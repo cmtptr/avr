@@ -1,21 +1,23 @@
 CC := sdcc
-CFLAGS += --stack-auto --std-c99 -mmcs51
+CFLAGS += --stack-auto --std-c99 --xram-size 768 -mmcs51
 LN := ln -f
+PACKIHX := packihx
 
 sources := $(wildcard *.c)
 objects := $(sources:.c=.rel)
 cs := cs
-hex := bootstrap.ihx
+ihx := bootstrap.ihx
+hex := bootstrap.hex
 
 .PHONY: all
-all: $(cs) $(hex)
+all: $(hex)
 
 .PHONY: clean
 clean:
 	@$(MAKE) -C checksum $(MAKECMDGOALS)
 	$(RM) $(wildcard *.asm) $(wildcard *.lk) $(wildcard *.lst)\
 		$(wildcard *.map) $(wildcard *.mem) $(wildcard *.rst)\
-		$(wildcard *.sym) $(objects) $(cs) $(hex)
+		$(wildcard *.sym) $(objects) $(cs) $(ihx) $(hex)
 
 .PHONY: $(cs)
 $(cs):
@@ -25,5 +27,8 @@ $(cs):
 %.rel: %.c Makefile
 	$(CC) $(CFLAGS) -c $<
 
-$(hex): $(objects)
-	$(CC) $(CFLAGS) -o $@ $^
+$(ihx): $(objects)
+	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $^ $(LDADD)
+
+$(hex): $(ihx)
+	$(PACKIHX) >$@ $^

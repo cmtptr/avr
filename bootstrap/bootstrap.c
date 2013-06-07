@@ -1,23 +1,44 @@
 #include <mcs51/p89v51rd2.h>
 
-void blinker(void) __interrupt (TF0_VECTOR)
-{
-	static unsigned short i = 0;
-	if (i < 5000) {
-		++i;
-		return;
-	}
-	i = 0;
-	P0_0 ^= 1;
-}
+#include "stdio.h"
+
+#define SCON_RI 0x01
+#define SCON_TI 0x02
+#define SCON_RB8 0x04
+#define SCON_TB8 0x08
+#define SCON_REN 0x10
+#define SCON_SM2 0x20
+#define SCON_SM1 0x40
+#define SCON_SM0 0x80
+
+#define IE_EX0 0x01
+#define IE_ET0 0x02
+#define IE_EX1 0x04
+#define IE_ET1 0x08
+#define IE_ES0 0x10
+#define IE_ET2 0x20
+#define IE_EC 0x40
+#define IE_EA 0x80
+
+#define T2CON_CP_RL2 0x01
+#define T2CON_C_T2 0x02
+#define T2CON_TR2 0x04
+#define T2CON_EXEN2 0x08
+#define T2CON_TCLK 0x10
+#define T2CON_RCLK 0x20
+#define T2CON_EXF2 0x40
+#define T2CON_TF2 0x80
 
 void main()
 {
-	TMOD = T0_M1;  /* 8-bit auto-reload mode */
-	TH0 = -100;  /* call blinker() every 100 cycles */
-	ET0 = 1;  /* enable timer 0 interrupt */
-	EA = 1;  /* enable interrupts */
-	TF0 = 1;  /* trigger the interrupt to init TL0 */
-	TR0 = 1;  /* start timer 0 */
+	/* set up the serial port */
+	SCON = SCON_SM1 | SCON_REN;  /* 8-bit UART mode, receive enabled */
+	IE = IE_EA | IE_ES0;  /* enable the serial interrupt */
+	RCAP2L = -78 & 0xff;  /* 9600 baud */
+	RCAP2H = (-78 & 0xff00) >> 8;
+	T2CON = T2CON_RCLK | T2CON_TCLK | T2CON_TR2;  /* start timer 2 */
+
+	/* print something! */
+	puts("Hello!");
 	while (1);
 }
