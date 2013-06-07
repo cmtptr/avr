@@ -1,0 +1,26 @@
+erase 128-byte sector at 0x0000
+:03000003080000F2
+
+erase 128-byte sector at 0x0080
+:0300000308008072
+
+erase block 0
+:0100000301FB
+
+read the first 16 bytes
+:050000040000000F00E8
+
+read the first 256 bytes
+:05000004000000FF00F8
+
+read the first 4096 bytes
+:0500000400000FFF00E9
+
+read the first 65,536 bytes
+:050000040000FFFF00F9
+
+write 000102030405060708090a0b0c0d0e0f to the first 16 bytes
+:10000000000102030405060708090A0B0C0D0E0F78
+
+end of file
+:00000001FF
