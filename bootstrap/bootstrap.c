@@ -29,16 +29,17 @@
 #define T2CON_EXF2 0x40
 #define T2CON_TF2 0x80
 
-void main()
+void main(void)
 {
 	/* set up the serial port */
 	SCON = SCON_SM1 | SCON_REN;  /* 8-bit UART mode, receive enabled */
+	RCAP2L = -20 & 0xff;  /* 19200 baud */
+	RCAP2H = (-20 & 0xff00) >> 8;
 	IE = IE_EA | IE_ES0;  /* enable the serial interrupt */
-	RCAP2L = -78 & 0xff;  /* 9600 baud */
-	RCAP2H = (-78 & 0xff00) >> 8;
-	T2CON = T2CON_RCLK | T2CON_TCLK | T2CON_TR2;  /* start timer 2 */
+	T2CON = T2CON_TF2 | T2CON_RCLK | T2CON_TCLK | T2CON_TR2;  /* start T2 */
 
 	/* print something! */
 	puts("Hello!");
-	while (1);
+	while (1)
+		putchar(getchar());
 }

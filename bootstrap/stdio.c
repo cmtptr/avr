@@ -8,7 +8,6 @@ static __xdata char rx_buf[BUFSIZ];
 
 static volatile unsigned char tx_rptr;
 static unsigned char tx_wptr;
-static volatile __bit tx_rdy = 1;
 static __xdata char tx_buf[BUFSIZ];
 
 void stdio_isr(void) __interrupt (SI0_VECTOR)
@@ -16,10 +15,9 @@ void stdio_isr(void) __interrupt (SI0_VECTOR)
 	if (RI) {
 		rx_buf[rx_wptr++] = SBUF;
 		RI = 0;
-	} else if (TI) {
-		if (tx_rptr == tx_wptr)
-			tx_rdy = 1;
-		else
+	}
+	if (TI) {
+		if (tx_rptr != tx_wptr)
 			SBUF = tx_buf[tx_rptr++];
 		TI = 0;
 	}
@@ -35,11 +33,9 @@ char getchar(void)
 
 void putchar(char c)
 {
-	if (tx_rdy) {
+	if (!TI)
 		SBUF = c;
-		tx_rdy = 0;
-	} else {
-		while (tx_wptr == tx_rptr);  /* block until flush */
+	else
 		tx_buf[tx_wptr++] = c;
-	}
+	P0 = tx_wptr;
 }
