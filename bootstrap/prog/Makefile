@@ -2,7 +2,7 @@ CFLAGS += -O3 -pedantic -std=c99 -Wall -Werror -Wextra
 
 sources := $(wildcard *.c)
 objects := $(sources:.c=.o)
-bin := cs
+bin := prog
 
 .PHONY: all
 all: $(bin)
