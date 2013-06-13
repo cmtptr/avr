@@ -3,7 +3,6 @@
 #include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <sys/select.h>
 #include <sys/stat.h>
 #include <termios.h>
 #include <unistd.h>
@@ -120,6 +119,36 @@ static struct hex *init_hex(const char *filename)
 	return rec;
 }
 
+/* send a record and return the status code received */
+static char record_send(int tty, unsigned char *record, size_t len)
+{
+	char buffer[HEX_RECORD_MAX * 2 + 5];
+	buffer[0] = ':';
+	char *ptr = buffer + 1;
+	for (size_t i = 0; i < len; ++i, ptr += 2)
+		sprintf(ptr, "%02X", record[i]);
+	len = ptr - buffer;
+	ssize_t l = write(tty, buffer, len);
+	if (l < 0) {
+		perror("write()");
+		return l;
+	} else if (l < (ssize_t)len) {
+		fprintf(stderr, "\"%.*s\": short write\n", (int)len, buffer);
+		return -1;
+	}
+	ptr = buffer;
+	do {
+		l = read(tty, ptr, 1);
+		ptr += l;
+	} while (l == 1 && (('0' <= ptr[-1] && ptr[-1] <= '9')
+				|| ('A' <= ptr[-1] && ptr[-1] <= 'F')
+				|| ('a' <= ptr[-1] && ptr[-1] <= 'f')
+				|| ptr[-1] == ':' || ptr[-1] == '\r'
+				|| ptr[-1] == '\n'));
+	printf("%.*s\n", (int)(ptr - buffer), buffer);
+	return ptr[-1];
+}
+
 int main(int argc, char **argv)
 {
 	if (argc != 3) {
@@ -148,18 +177,11 @@ int main(int argc, char **argv)
 		unsigned char al = addr & 0xff;
 		unsigned char ah = (addr & 0xff00) >> 8;
 		unsigned char checksum = -(0xe + ah + al);
-		char buf[19];
-		snprintf(buf, sizeof buf, ":0300000308%02x%02x%02x\n", ah, al,
-				checksum);
-		write(tty, buf, sizeof buf - 1);
-		struct timeval pause = {.tv_sec = 0, .tv_usec = 100000};
-		select(0, 0, 0, 0, &pause);
-		while (!*buf || *buf == ':' || ('0' <= *buf && *buf <= '9')
-				|| ('a' <= *buf && *buf <= 'f') || *buf == '\r'
-				|| *buf == '\n')
-			read(tty, buf, 1);
-		if (*buf != '.') {
-			fprintf(stderr, "*buf='%c' (0x%02x)\n", *buf, (int)*buf);
+		unsigned char record[] = {3, 0, 0, 3, 8, ah, al, checksum};
+		char status = record_send(tty, record, sizeof record);
+		if (status != '.') {
+			fprintf(stderr, "erase sector 0x%04hx failed: 0x%02x\n",
+					addr, (int)status);
 			free(rec);
 			close(tty);
 			return -1;
@@ -168,20 +190,14 @@ int main(int argc, char **argv)
 	for (unsigned int i = 0; i < rec->records_count; ++i) {
 		if (rec->records[i][3])
 			continue;
-		char buf[HEX_RECORD_MAX * 2 + 3];
-		buf[0] = ':';
-		unsigned char len = rec->records[i][0] + 5;
-		for (unsigned char j = 0; j < len; ++j)
-			sprintf(buf + j * 2 + 1, "%02x\r", rec->records[i][j]);
-		write(tty, buf, sizeof buf - 1);
-		struct timeval pause = {.tv_sec = 0, .tv_usec = 100000};
-		select(0, 0, 0, 0, &pause);
-		while (!*buf || *buf == ':' || ('0' <= *buf && *buf <= '9')
-				|| ('a' <= *buf && *buf <= 'f') || *buf == '\r'
-				|| *buf == '\n')
-			read(tty, buf, 1);
-		if (*buf != '.') {
-			fprintf(stderr, "*buf='%c' (0x%02x)\n", *buf, (int)*buf);
+		char status = record_send(tty, rec->records[i],
+				rec->records[i][0] + 5);
+		if (status != '.') {
+			unsigned short addr = (rec->records[i][1] << 8)
+				| rec->records[i][2];
+			fprintf(stderr, "write %u bytes to address 0x%04hx failed: 0x%02x\n",
+					(unsigned int)rec->records[i][0],
+					addr, (int)status);
 			free(rec);
 			close(tty);
 			return -1;
