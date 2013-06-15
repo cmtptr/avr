@@ -1,13 +1,22 @@
 #ifndef STDIO_H
 #define STDIO_H
 
-#include <stdio.h>
+#define BUFSIZ 0x40
 
-#define CHAR_BIT 8
-#define BUFSIZ (1 << CHAR_BIT)
-
-void stdio_isr(
+extern void stdio_isr(
 		void
 ) __interrupt (SI0_VECTOR);
+
+extern char getchar(
+		void
+);
+
+extern void putchar(
+		char c
+);
+
+extern int puts(
+		const char *s
+);
 
 #endif

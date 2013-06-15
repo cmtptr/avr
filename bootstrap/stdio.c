@@ -6,36 +6,66 @@ static unsigned char rx_rptr;
 static volatile unsigned char rx_wptr;
 static __xdata char rx_buf[BUFSIZ];
 
-static volatile unsigned char tx_rptr;
+static __sbit tx_rdy = 1;
+static unsigned char tx_rptr;
 static unsigned char tx_wptr;
 static __xdata char tx_buf[BUFSIZ];
 
-void stdio_isr(void) __interrupt (SI0_VECTOR)
+void stdio_isr() __interrupt (SI0_VECTOR)
 {
 	if (RI) {
-		rx_buf[rx_wptr++] = SBUF;
+		unsigned char next;
 		RI = 0;
+		next = rx_wptr + 1;
+		next %= BUFSIZ;
+		if (next != rx_rptr) {
+			rx_buf[rx_wptr] = SBUF;
+			rx_wptr = next;
+		}
 	}
 	if (TI) {
-		if (tx_rptr != tx_wptr)
-			SBUF = tx_buf[tx_rptr++];
 		TI = 0;
+		if (tx_rptr == tx_wptr) {
+			tx_rdy = 1;
+		} else {
+			SBUF = tx_buf[tx_rptr++];
+			tx_rptr %= BUFSIZ;
+		}
 	}
 }
 
-char getchar(void)
+char getchar()
 {
 	char c;
 	while (rx_rptr == rx_wptr);  /* block until something is available */
+	ES = 0;
 	c = rx_buf[rx_rptr++];
+	rx_rptr %= BUFSIZ;
+	ES = 1;
 	return c;
 }
 
 void putchar(char c)
 {
-	if (!TI)
+	if (c == '\n')
+		putchar('\r');
+	ES = 0;
+	if (tx_rdy) {
+		tx_rdy = 0;
 		SBUF = c;
-	else
-		tx_buf[tx_wptr++] = c;
-	P0 = tx_wptr;
+	} else {
+		unsigned char next = tx_wptr + 1;
+		next %= BUFSIZ;
+		while (next == tx_rptr);  /* block until there is room */
+		tx_buf[tx_wptr] = c;
+		tx_wptr = next;
+	}
+	ES = 1;
+}
+
+int puts(const char *s)
+{
+	for (; *s; ++s)
+		putchar(*s);
+	return 1;
 }

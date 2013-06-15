@@ -39,7 +39,13 @@ void main(void)
 	T2CON = T2CON_TF2 | T2CON_RCLK | T2CON_TCLK | T2CON_TR2;  /* start T2 */
 
 	/* print something! */
-	puts("Hello!");
-	while (1)
-		putchar(getchar());
+	while (1) {
+		char c = 0;
+		puts("prompt> ");
+		do {
+			c = getchar();
+			putchar(c);
+		} while (c != '\r');
+		putchar('\n');
+	}
 }
