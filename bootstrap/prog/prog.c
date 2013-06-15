@@ -145,7 +145,6 @@ static char record_send(int tty, unsigned char *record, size_t len)
 				|| ('a' <= ptr[-1] && ptr[-1] <= 'f')
 				|| ptr[-1] == ':' || ptr[-1] == '\r'
 				|| ptr[-1] == '\n'));
-	printf("%.*s\n", (int)(ptr - buffer), buffer);
 	return ptr[-1];
 }
 
