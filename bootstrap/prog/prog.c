@@ -3,6 +3,7 @@
 #include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <sys/select.h>
 #include <sys/stat.h>
 #include <termios.h>
 #include <unistd.h>
@@ -19,7 +20,7 @@ struct hex {
 /* setup serial communication */
 static int init_tty(const char *filename)
 {
-	int tty = open(filename, O_RDWR | O_NOCTTY);
+	int tty = open(filename, O_RDWR | O_NOCTTY | O_NONBLOCK);
 	if (tty < 0) {
 		perror("open()");
 		return tty;
@@ -119,6 +120,19 @@ static struct hex *init_hex(const char *filename)
 	return rec;
 }
 
+/* put the mcu into in-system programming mode */
+static void isp(int tty)
+{
+	char c = 0;
+	ssize_t l;
+	do {
+		const char u = 'U';
+		write(tty, &u, sizeof u);
+		select(0, 0, 0, 0, &(struct timeval){0, 40000});
+		l = read(tty, &c, sizeof c);
+	} while (l < 0 || c != 'U');
+}
+
 /* send a record and return the status code received */
 static char record_send(int tty, unsigned char *record, size_t len)
 {
@@ -138,6 +152,10 @@ static char record_send(int tty, unsigned char *record, size_t len)
 	}
 	ptr = buffer;
 	do {
+		fd_set fdr;
+		FD_ZERO(&fdr);
+		FD_SET(tty, &fdr);
+		select(tty + 1, &fdr, 0, 0, 0);
 		l = read(tty, ptr, 1);
 		ptr += l;
 	} while (l == 1 && (('0' <= ptr[-1] && ptr[-1] <= '9')
@@ -172,6 +190,7 @@ int main(int argc, char **argv)
 		if (addr > addr_max)
 			addr_max = addr;
 	}
+	isp(tty);
 	for (unsigned short addr = 0; addr < addr_max; addr += 0x80) {
 		unsigned char al = addr & 0xff;
 		unsigned char ah = (addr & 0xff00) >> 8;
