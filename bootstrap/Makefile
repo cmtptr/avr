@@ -1,10 +1,10 @@
 CC := sdcc
-CFLAGS += --stack-auto --std-c99 --xram-size 768 -mmcs51
+CPPFLAGS := --stack-auto --std-c99 -mmcs51
+LDFLAGS := --stack-size 128 --xram-size 768
 PACKIHX := packihx
 
-sources := $(wildcard *.c)
+sources := bootstrap.c stdio.c
 objects := $(sources:.c=.rel)
-prog := prog/prog
 ihx := bootstrap.ihx
 hex := bootstrap.hex
 
@@ -18,15 +18,21 @@ clean:
 		$(wildcard *.map) $(wildcard *.mem) $(wildcard *.rst)\
 		$(wildcard *.sym) $(objects) $(cs) $(ihx) $(hex)
 
-.PHONY: $(prog)
-$(prog):
+.PHONY: prog
+prog:
 	@$(MAKE) -C prog
 
-%.rel: %.c Makefile
-	$(CC) $(CFLAGS) -c $<
+.SUFFIXES:
+.SUFFIXES: .rel .c
+.c.rel:
+	$(CC) $(CFLAGS) $(CPPFLAGS) -c -o $@ $<
 
 $(ihx): $(objects)
-	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $^ $(LDADD)
+	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $(objects) $(LDADD)
 
 $(hex): $(ihx)
-	$(PACKIHX) >$@ $^
+	$(PACKIHX) >$@ $(ihx)
+
+$(objects): Makefile
+bootstrap.rel: bootstrap.c stdio.h
+stdio.rel: stdio.c stdio.h

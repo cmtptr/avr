@@ -1,6 +1,6 @@
-CFLAGS += -O3 -pedantic -std=c99 -Wall -Werror -Wextra
+CPPFLAGS += -pedantic -std=c99 -Wall -Werror -Wextra
 
-sources := $(wildcard *.c)
+sources := prog.c
 objects := $(sources:.c=.o)
 bin := prog
 
@@ -11,12 +11,12 @@ all: $(bin)
 clean:
 	$(RM) $(depends) $(objects) $(bin)
 
-%.d: %.c
-	$(CC) $(CFLAGS) -MM -MP -MT "$(@:.d=.o) $@" -o $@ $^
-
-ifneq ($(MAKECMDGOALS),clean)
--include $(depends)
-endif
+.SUFFIXES:
+.SUFFIXES: .c .o
+.c.o:
+	$(CC) $(CFLAGS) $(CPPFLAGS) -c -o $@ $<
 
 $(bin): $(objects)
-	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $^ $(LDADD)
+	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $(objects) $(LDADD)
+
+$(objects): Makefile

@@ -1,11 +1,11 @@
-MCU ?= attiny24a
+MCU ?= attiny25
 
 CC := avr-gcc
-CFLAGS += -mmcu=$(MCU) -pedantic -std=c99 -Wall -Werror -Wextra
+CPPFLAGS := -DF_CPU=8000000UL -mmcu=$(MCU) -O2 -pedantic -std=c99 -Wall -Werror\
+	-Wextra
 OBJCOPY := avr-objcopy
 
-sources := $(wildcard *.c)
-depends := $(sources:.c=.d)
+sources := test.c
 objects := $(sources:.c=.o)
 bin := avr.elf
 hex := avr.hex
@@ -15,19 +15,17 @@ all: $(hex)
 
 .PHONY: clean
 clean:
-	$(RM) $(depends) $(objects) $(bin) $(hex)
+	$(RM) $(objects) $(bin) $(hex)
 
-%.d: %.c
-	$(CC) $(CFLAGS) -MM -MP -MT "$(@:.d=.o) $@" -o $@ $^
-
-ifneq ($(MAKECMDGOALS),clean)
--include $(depends)
-endif
-
-$(objects): Makefile
+.SUFFIXES:
+.SUFFIXES: .o .c
+.c.o:
+	$(CC) $(CFLAGS) $(CPPFLAGS) -c -o $@ $<
 
 $(bin): $(objects)
-	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $^ $(LDADD)
+	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $(objects) $(LDADD)
 
 $(hex): $(bin)
-	$(OBJCOPY) -O ihex $^ $@
+	$(OBJCOPY) -O ihex $(bin) $@
+
+$(objects): Makefile

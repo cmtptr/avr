@@ -1,3 +1,3 @@
-*.[do]
-/*.elf
-/*.hex
+*.o
+/avr.elf
+/avr.hex

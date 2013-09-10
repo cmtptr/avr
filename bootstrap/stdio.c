@@ -5,12 +5,10 @@
 static unsigned char rx_rptr;
 static volatile unsigned char rx_wptr;
 static __xdata char rx_buf[BUFSIZ];
-
 static __sbit tx_rdy = 1;
 static unsigned char tx_rptr;
 static unsigned char tx_wptr;
 static __xdata char tx_buf[BUFSIZ];
-
 void stdio_isr() __interrupt (SI0_VECTOR)
 {
 	if (RI) {
