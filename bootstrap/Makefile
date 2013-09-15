@@ -1,6 +1,7 @@
 CC := sdcc
+CFLAGS := --model-large
 CPPFLAGS := --stack-auto --std-c99 -mmcs51
-LDFLAGS := --stack-size 128 --xram-size 768
+LDFLAGS := --code-size 65536 --iram-size 256 --xram-size 768
 PACKIHX := packihx
 
 sources := bootstrap.c stdio.c

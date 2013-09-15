@@ -2,14 +2,14 @@
 
 #include "stdio.h"
 
-static unsigned char rx_rptr;
-static volatile unsigned char rx_wptr;
-static __xdata char rx_buf[BUFSIZ];
+static __data unsigned char rx_rptr;
+static __data volatile unsigned char rx_wptr;
+static __idata char rx_buf[BUFSIZ];
 static __sbit tx_rdy = 1;
-static unsigned char tx_rptr;
-static unsigned char tx_wptr;
-static __xdata char tx_buf[BUFSIZ];
-void stdio_isr() __interrupt (SI0_VECTOR)
+static __data unsigned char tx_rptr;
+static __data unsigned char tx_wptr;
+static __idata char tx_buf[BUFSIZ];
+void stdio_isr(void) __interrupt (SI0_VECTOR)
 {
 	if (RI) {
 		unsigned char next;
@@ -32,7 +32,7 @@ void stdio_isr() __interrupt (SI0_VECTOR)
 	}
 }
 
-char getchar()
+char getchar(void)
 {
 	char c;
 	while (rx_rptr == rx_wptr);  /* block until something is available */
