@@ -35,27 +35,35 @@ void stdio_isr(void) __interrupt (SI0_VECTOR);
 /* pretty accurate delay in milliseconds up to 16 seconds */
 static void delay_ms(unsigned short ms)
 {
-	ms *= 4;  /* 1000 / 250 */
+	ms = (ms << 2) + 1;  /* 1000 / 250 */
 	TL0 = TH0;
 	TR0 = 1;
 	do {
 		while (!TF0);
 		TF0 = 0;
-	} while (--ms != -1U);
+	} while (--ms);
 	TR0 = 0;
 }
 
-static void spi_send(unsigned char c)
+/* transmit/receive on the SPI */
+static void spi_xcv(unsigned char c)
 {
 	SPSR &= ~SPIF;
 	SPDAT = c;
 	while (!(SPSR & SPIF));
 }
 
+/* put the AVR into serial programming mode */
 static void avr_init(void)
 {
 	unsigned char c;
+	unsigned char count = 0;
+	puts("initializing AVR serial programming mode... ");
 	do {
+		++count;
+		if ((count & 0xf) > 9)
+			count += 0x10 - 9;
+
 		/* as per the AVR datasheet:
 		 * "In some systems, the programmer can not guarantee that SCK
 		 * is held low during power-up. In this case, RESET must be
@@ -70,8 +78,8 @@ static void avr_init(void)
 		 * sending the Programming Enable serial instruction to pin
 		 * MOSI." */
 		delay_ms(20);
-		spi_send(0xac);
-		spi_send(0x53);
+		spi_xcv(0xac);
+		spi_xcv(0x53);
 
 		/* "The serial programming instructions will not work if the
 		 * communication is out of synchronization. When in sync. the
@@ -80,10 +88,20 @@ static void avr_init(void)
 		 * is correct or not, all four bytes of the instruction must be
 		 * transmitted. If the 0x53 did not echo back, give RESET a
 		 * positive pulse and issue a new Programming Enable command." */
-		spi_send(0);
+		spi_xcv(0);
 		c = SPDAT;
-		spi_send(0);
+		spi_xcv(0);
 	} while (c != 0x53);
+	puts("success after ");
+	c = (count >> 4) & 0xf;
+	if (c)
+		putchar(c + '0');
+	putchar((count & 0xf) + '0');
+	puts(" attempt");
+	if (count > 1)
+		puts("s!\n");
+	else
+		puts("!\n");
 }
 
 void main(void)
@@ -91,21 +109,21 @@ void main(void)
 	/* hold the AVR in reset */
 	AVR_RESET = 0;
 
-	/* set up the delay timer */
+	/* delay timer setup */
 	TMOD = T0_M1;  /* timer 0 in 8-bit auto-reload mode */
 	TH0 = -250 & 0xff;
 
-	/* set up the serial port */
+	/* serial port setup */
 	SCON = SCON_SM1 | SCON_REN;  /* 8-bit UART mode, receive enabled */
 	RCAP2L = -20 & 0xff;  /* 19200 baud */
 	RCAP2H = (-20 & 0xff00) >> 8;
 	IE = IE_EA | IE_ES0;  /* enable the serial interrupt */
 	T2CON = T2CON_TF2 | T2CON_RCLK | T2CON_TCLK | T2CON_TR2;  /* start T2 */
 
-	/* set up the SPI */
+	/* SPI setup */
 	SPCR = SPE | MSTR | SPR1;  /* SPI on, master mode, SCK = f(OSC) / 64 */
 
-	/* put the AVR into serial programming mode */
+	/* AVR setup */
 	avr_init();
 
 	/* repl */
