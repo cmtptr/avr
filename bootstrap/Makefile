@@ -15,9 +15,9 @@ all: $(hex)
 .PHONY: clean
 clean:
 	@$(MAKE) -C prog $(MAKECMDGOALS)
-	$(RM) $(wildcard *.asm) $(wildcard *.lk) $(wildcard *.lst)\
-		$(wildcard *.map) $(wildcard *.mem) $(wildcard *.rst)\
-		$(wildcard *.sym) $(objects) $(cs) $(ihx) $(hex)
+	$(RM) $(objects:.rel=.asm) $(objects:.rel=.lst) $(objects:.rel=.rst)\
+		$(objects:.rel=.sym) $(objects) $(ihx:.ihx=.lk) $(ihx:.ihx=.map)\
+		$(ihx:.ihx=.mem) $(ihx) $(hex)
 
 .PHONY: prog
 prog:

@@ -1,3 +1,4 @@
+CFLAGS ?= -O2 -pipe
 CPPFLAGS += -pedantic -std=c99 -Wall -Werror -Wextra
 
 sources := prog.c
