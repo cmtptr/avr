@@ -104,6 +104,44 @@ static void avr_init(void)
 		puts("!\n");
 }
 
+static void eval_corey(void)
+{
+	unsigned char h = SP >> 4, l = SP & 0xf;
+	puts("That's my name, don't wear it out!\nSP = ");
+	putchar(h + (h > 9 ? 'a' - 0xa : '0'));
+	putchar(l + (l > 9 ? 'a' - 0xa : '0'));
+	putchar('\n');
+}
+
+static char strncmp(const char *s1, const char *s2, unsigned char n)
+{
+	unsigned char i;
+	for (i = 0; i < n; ++i) {
+		char dc = *s1 - *s2;
+		if (dc)
+			return dc;
+	}
+	return 0;
+}
+
+static void eval(const char *key, unsigned char len)
+{
+	static struct {
+		unsigned char len;
+		const char *key;
+		void (*vector)(void);
+	} vectors[] = {
+		{5, "corey", eval_corey},
+	};
+	unsigned char i;
+	for (i = 0; i < sizeof vectors / sizeof *vectors; ++i)
+		if (len == vectors[i].len && !strncmp(key, vectors[i].key, len)) {
+			vectors[i].vector();
+			return;
+		}
+	puts("command not found\n");
+}
+
 void main(void)
 {
 	/* hold the AVR in reset */
@@ -129,7 +167,7 @@ void main(void)
 	/* repl */
 	while (1) {
 		static char buffer[BUFSIZ];
-		unsigned char ptr = 0;
+		char ptr = 0;
 		puts("> ");
 		while (1) {
 			char c = getchar();
@@ -148,5 +186,10 @@ void main(void)
 			}
 		}
 		putchar('\n');
+		for (--ptr; ptr > 0 && buffer[ptr] < '!' || '~' < buffer[ptr];
+				--ptr);
+		++ptr;
+		if (ptr)
+			eval(buffer, ptr);
 	}
 }
