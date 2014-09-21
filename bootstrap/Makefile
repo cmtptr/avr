@@ -4,7 +4,7 @@ CPPFLAGS := --stack-auto --std-c99 -mmcs51
 LDFLAGS := --code-size 65536 --iram-size 256 --xram-size 768
 PACKIHX := packihx
 
-sources := bootstrap.c stdio.c
+sources := bootstrap.c stdio.c string.c
 objects := $(sources:.c=.rel)
 ihx := bootstrap.ihx
 hex := bootstrap.hex
@@ -35,5 +35,6 @@ $(hex): $(ihx)
 	$(PACKIHX) >$@ $(ihx)
 
 $(objects): Makefile
-bootstrap.rel: bootstrap.c stdio.h
+bootstrap.rel: bootstrap.c stdio.h string.h
 stdio.rel: stdio.c stdio.h
+string.rel: string.c string.h

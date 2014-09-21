@@ -1,9 +1,12 @@
 #include <mcs51/p89v51rd2.h>
 
 #include "stdio.h"
+#include "string.h"
 void stdio_isr(void) __interrupt (SI0_VECTOR);
 
 #define AVR_RESET P1_0
+#define F_OSC 4915200
+#define F_UART 19200
 
 #define SCON_RI 0x01
 #define SCON_TI 0x02
@@ -35,7 +38,7 @@ void stdio_isr(void) __interrupt (SI0_VECTOR);
 /* pretty accurate delay in milliseconds up to 16 seconds */
 static void delay_ms(unsigned short ms)
 {
-	ms = (ms << 2) + 1;  /* 1000 / 250 */
+	ms = (ms << 2) + 1;  /* 1000us / 250us */
 	TL0 = TH0;
 	TR0 = 1;
 	do {
@@ -104,42 +107,53 @@ static void avr_init(void)
 		puts("!\n");
 }
 
-static void eval_corey(void)
+static void avr_read(const char *args, unsigned char len)
 {
 	unsigned char h = SP >> 4, l = SP & 0xf;
-	puts("That's my name, don't wear it out!\nSP = ");
+	if (!len) {
+		puts("usage: read <page addr>\n");
+		return;
+	}
+	puts("read stub!\naddr=\"");
+	puts(args);
+	puts("\" SP = 0x");
 	putchar(h + (h > 9 ? 'a' - 0xa : '0'));
 	putchar(l + (l > 9 ? 'a' - 0xa : '0'));
 	putchar('\n');
 }
 
-static char strncmp(const char *s1, const char *s2, unsigned char n)
+static void test(char *buffer, unsigned char len)
 {
 	unsigned char i;
-	for (i = 0; i < n; ++i) {
-		char dc = *s1 - *s2;
-		if (dc)
-			return dc;
-	}
-	return 0;
+	(void)buffer;
+	(void)len;
+	for (i = 0; i < 24; ++i)
+		puts("qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq\n");
 }
 
-static void eval(const char *key, unsigned char len)
+static void eval(char *buffer, unsigned char len)
 {
 	static struct {
 		unsigned char len;
 		const char *key;
-		void (*vector)(void);
+		void (*vector)(const char *, unsigned char);
 	} vectors[] = {
-		{5, "corey", eval_corey},
+		{4, "read", avr_read},
+		{4, "test", test},
 	};
-	unsigned char i;
-	for (i = 0; i < sizeof vectors / sizeof *vectors; ++i)
-		if (len == vectors[i].len && !strncmp(key, vectors[i].key, len)) {
-			vectors[i].vector();
+	unsigned char i, key_len = strcspn(buffer, " ");
+	for (i = 0; i < sizeof vectors / sizeof *vectors; ++i) {
+		if (key_len == vectors[i].len
+				&& !strncmp(buffer, vectors[i].key, key_len)) {
+			for (; buffer[key_len] == ' '; ++key_len);
+			vectors[i].vector(buffer + key_len, len - key_len);
 			return;
 		}
-	puts("command not found\n");
+	}
+	puts("invalid command \"");
+	buffer[key_len] = '\0';
+	puts(buffer);
+	puts("\"\n");
 }
 
 void main(void)
@@ -149,12 +163,12 @@ void main(void)
 
 	/* delay timer setup */
 	TMOD = T0_M1;  /* timer 0 in 8-bit auto-reload mode */
-	TH0 = -250 & 0xff;
+	TH0 = -F_OSC / 12 / 4000;  /* 250-us timer */
 
 	/* serial port setup */
 	SCON = SCON_SM1 | SCON_REN;  /* 8-bit UART mode, receive enabled */
-	RCAP2L = -20 & 0xff;  /* 19200 baud */
-	RCAP2H = (-20 & 0xff00) >> 8;
+	RCAP2L = -F_OSC / 32 / F_UART;
+	RCAP2H = -F_OSC / 32 / F_UART >> 8;
 	IE = IE_EA | IE_ES0;  /* enable the serial interrupt */
 	T2CON = T2CON_TF2 | T2CON_RCLK | T2CON_TCLK | T2CON_TR2;  /* start T2 */
 
@@ -179,7 +193,7 @@ void main(void)
 				--ptr;
 				puts("\x8 \x8");
 			} else {
-				if (ptr >= sizeof buffer / sizeof *buffer)
+				if (ptr >= BUFSIZ - 1)
 					continue;
 				buffer[ptr++] = c;
 				putchar(c);
@@ -188,8 +202,12 @@ void main(void)
 		putchar('\n');
 		for (--ptr; ptr > 0 && buffer[ptr] < '!' || '~' < buffer[ptr];
 				--ptr);
-		++ptr;
-		if (ptr)
-			eval(buffer, ptr);
+		if (++ptr) {
+			char leading;
+			buffer[ptr] = '\0';
+			for (leading = 0; buffer[leading] == ' '; ++leading);
+			if (leading < ptr)
+				eval(buffer + leading, ptr - leading);
+		}
 	}
 }

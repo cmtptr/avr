@@ -3,9 +3,10 @@
 #include "stdio.h"
 
 static __data unsigned char rx_rptr;
-static __data volatile unsigned char rx_wptr;
+static __data unsigned char rx_wptr;
 static __idata char rx_buf[BUFSIZ];
-static __sbit tx_rdy = 1;
+static __bit tx_idle = 1;
+static __bit tx_empty = 1;
 static __data unsigned char tx_rptr;
 static __data unsigned char tx_wptr;
 static __idata char tx_buf[BUFSIZ];
@@ -23,11 +24,14 @@ void stdio_isr(void) __interrupt (SI0_VECTOR)
 	}
 	if (TI) {
 		TI = 0;
-		if (tx_rptr == tx_wptr) {
-			tx_rdy = 1;
+		if (tx_empty) {
+			tx_idle = 1;
 		} else {
 			SBUF = tx_buf[tx_rptr++];
 			tx_rptr %= BUFSIZ;
+			if (tx_rptr == tx_wptr) {
+				tx_empty = 1;
+			}
 		}
 	}
 }
@@ -47,18 +51,23 @@ void putchar(char c)
 {
 	if (c == '\n')
 		putchar('\r');
-	ES = 0;
-	if (tx_rdy) {
-		tx_rdy = 0;
+	if (tx_idle) {
+		tx_idle = 0;
 		SBUF = c;
 	} else {
-		unsigned char next = tx_wptr + 1;
-		next %= BUFSIZ;
-		while (next == tx_rptr);  /* block until there is room */
-		tx_buf[tx_wptr] = c;
-		tx_wptr = next;
+		/* block until there is room */
+		while (tx_rptr == tx_wptr && !tx_empty);
+		if (tx_idle) {
+			tx_idle = 0;
+			SBUF = c;
+		} else {
+			ES = 0;
+			tx_empty = 0;
+			tx_buf[tx_wptr++] = c;
+			tx_wptr %= BUFSIZ;
+			ES = 1;
+		}
 	}
-	ES = 1;
 }
 
 int puts(const char *s)
