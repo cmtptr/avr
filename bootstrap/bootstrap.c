@@ -1,12 +1,9 @@
 #include <mcs51/p89v51rd2.h>
 
+#include "avr.h"
 #include "stdio.h"
 #include "string.h"
 void stdio_isr(void) __interrupt (SI0_VECTOR);
-
-#define AVR_RESET P1_0
-#define F_OSC 4915200
-#define F_UART 19200
 
 #define SCON_RI 0x01
 #define SCON_TI 0x02
@@ -36,7 +33,7 @@ void stdio_isr(void) __interrupt (SI0_VECTOR);
 #define T2CON_TF2 0x80
 
 /* pretty accurate delay in milliseconds up to 16 seconds */
-static void delay_ms(unsigned short ms)
+void delay_ms(unsigned short ms)
 {
 	ms = (ms << 2) + 1;  /* 1000us / 250us */
 	TL0 = TH0;
@@ -48,87 +45,154 @@ static void delay_ms(unsigned short ms)
 	TR0 = 0;
 }
 
-/* transmit/receive on the SPI */
-static void spi_xcv(unsigned char c)
+/* convert a hexadecimal string to a short integer */
+static short strtoh(const char *nptr, const char **endptr)
 {
-	SPSR &= ~SPIF;
-	SPDAT = c;
-	while (!(SPSR & SPIF));
-}
-
-/* put the AVR into serial programming mode */
-static void avr_init(void)
-{
-	unsigned char c;
-	unsigned char count = 0;
-	puts("initializing AVR serial programming mode... ");
-	do {
-		++count;
-		if ((count & 0xf) > 9)
-			count += 0x10 - 9;
-
-		/* as per the AVR datasheet:
-		 * "In some systems, the programmer can not guarantee that SCK
-		 * is held low during power-up. In this case, RESET must be
-		 * given a positive pulse after SCK has been set to '0'. The
-		 * duration of the pulse must be at least t(RST) plus two CPU
-		 * clock cycles." */
-		AVR_RESET = 1;
-		delay_ms(1);
-		AVR_RESET = 0;
-
-		/* "Wait for at least 20 ms and enable serial programming by
-		 * sending the Programming Enable serial instruction to pin
-		 * MOSI." */
-		delay_ms(20);
-		spi_xcv(0xac);
-		spi_xcv(0x53);
-
-		/* "The serial programming instructions will not work if the
-		 * communication is out of synchronization. When in sync. the
-		 * second byte (0x53), will echo back when issuing the third
-		 * byte of the Programming Enable instruction. Whether the echo
-		 * is correct or not, all four bytes of the instruction must be
-		 * transmitted. If the 0x53 did not echo back, give RESET a
-		 * positive pulse and issue a new Programming Enable command." */
-		spi_xcv(0);
-		c = SPDAT;
-		spi_xcv(0);
-	} while (c != 0x53);
-	puts("success after ");
-	c = (count >> 4) & 0xf;
-	if (c)
-		putchar(c + '0');
-	putchar((count & 0xf) + '0');
-	puts(" attempt");
-	if (count > 1)
-		puts("s!\n");
-	else
-		puts("!\n");
-}
-
-static void avr_read(const char *args, unsigned char len)
-{
-	unsigned char h = SP >> 4, l = SP & 0xf;
-	if (!len) {
-		puts("usage: read <page addr>\n");
-		return;
+	__bit is_negative;
+	short val = 0;
+	for (; *nptr && (*nptr < '!' || '~' < *nptr); ++nptr);
+	if (*nptr == '-') {
+		++nptr;
+		is_negative = 1;
+	} else {
+		is_negative = 0;
 	}
-	puts("read stub!\naddr=\"");
-	puts(args);
-	puts("\" SP = 0x");
+	for (; *nptr; ++nptr) {
+		char c = *nptr;
+		if ('0' <= c && c <= '9')
+			c -= '0';
+		else if ('A' <= c && c <= 'Z')
+			c -= 'A' - 0xa;
+		else if ('a' <= c && c <= 'z')
+			c -= 'a' - 0xa;
+		else
+			break;
+		if (c >= 0x10)
+			break;
+		val *= 0x10;
+		val += c;
+	}
+	if (is_negative)
+		val = -val;
+	if (endptr)
+		*endptr = nptr;
+	return val;
+}
+
+/* print a single byte in hexadecimal */
+static void print_hex(unsigned char c)
+{
+	unsigned char h = c >> 4, l = c & 0xf;
 	putchar(h + (h > 9 ? 'a' - 0xa : '0'));
 	putchar(l + (l > 9 ? 'a' - 0xa : '0'));
-	putchar('\n');
 }
 
-static void test(char *buffer, unsigned char len)
+static void eval_erase(const char *args, unsigned char len)
 {
-	unsigned char i;
-	(void)buffer;
+	char c;
+	(void)args;
 	(void)len;
-	for (i = 0; i < 24; ++i)
-		puts("qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq\n");
+	puts("This will erase all program memory and EEPROM!!"
+			"  Are you sure? [y/N]: ");
+	while (c = getchar(), c < '!' && '~' < c && c != '\r');
+	putchar(c);
+	putchar('\n');
+	if (c == 'y' || c == 'Y')
+		avr_erase();
+	else
+		puts("aborted\n");
+}
+
+static void eval_hexdump(const char *args, unsigned char len)
+{
+	short start, count, addr, stop;
+	if (!len) {
+		start = 0;
+	} else {
+		const char *end;
+		start = strtoh(args, &end);
+		if ('!' <= *end && *end <= '~')
+			goto usage;
+		len -= end - args;
+		args = end;
+	}
+	if (start < 0)
+		start += 0x800;
+	if (!len) {
+		count = 0x800 - start;
+	} else {
+		count = strtoh(args, &args);
+		if ('!' <= *args && *args <= '~')
+			goto usage;
+	}
+	if (count < 0) {
+		start += count;
+		count = -count;
+	}
+	stop = start + count;
+	if (stop > 0x800)
+		stop = 0x800;
+	addr = start & ~0x1f;  /* floor to the nearest page boundary */
+	count = (stop + 0x1f) & ~0x1f;  /* ceil to the nearest page boundary */
+	for (; addr < count; addr += 0x10) {
+		unsigned short i, j;
+		char buf[0x10 + 1];
+		print_hex(addr >> 8);
+		print_hex(addr & 0xff);
+		puts("  ");
+		for (i = addr, j = addr + 8; i < j; ++i) {
+			if (i < start || stop <= i) {
+				puts("   ");
+				buf[i - addr] = ' ';
+			} else {
+				unsigned char c = avr_read(i);
+				print_hex(c);
+				putchar(' ');
+				buf[i - addr] = '!' <= c && c <= '~' ? c : '.';
+			}
+		}
+		putchar(' ');
+		for (j += 8; i < j; ++i) {
+			if (i < start || stop <= i) {
+				puts("   ");
+				buf[i - addr] = ' ';
+			} else {
+				unsigned char c = avr_read(i);
+				print_hex(c);
+				putchar(' ');
+				buf[i - addr] = '!' <= c && c <= '~' ? c : '.';
+			}
+		}
+		buf[sizeof buf - 1] = '\0';
+		puts("  |");
+		puts(buf);
+		puts("|\n");
+	}
+	return;
+usage:
+	puts("usage: hexdump [<addr> [<count>]]\n");
+}
+
+static void eval_spi(const char *args, unsigned char len)
+{
+	unsigned char i, buf[4];
+	(void)len;
+	for (i = 0; i < sizeof buf; ++i) {
+		const char *end;
+		buf[i] = strtoh(args, &end);
+		if (end == args || ('!' <= *end && *end <= '~'))
+			goto usage;
+		args = end;
+	}
+	avr_spi(buf, buf);
+	for (i = 0; i < sizeof buf; ++i) {
+		print_hex(buf[i]);
+		putchar(' ');
+	}
+	putchar('\n');
+	return;
+usage:
+	puts("usage: spi <byte1> <byte2> <byte3> <byte4>\n");
 }
 
 static void eval(char *buffer, unsigned char len)
@@ -138,8 +202,9 @@ static void eval(char *buffer, unsigned char len)
 		const char *key;
 		void (*vector)(const char *, unsigned char);
 	} vectors[] = {
-		{4, "read", avr_read},
-		{4, "test", test},
+		{5, "erase", eval_erase},
+		{7, "hexdump", eval_hexdump},
+		{3, "spi", eval_spi},
 	};
 	unsigned char i, key_len = strcspn(buffer, " ");
 	for (i = 0; i < sizeof vectors / sizeof *vectors; ++i) {
@@ -176,7 +241,8 @@ void main(void)
 	SPCR = SPE | MSTR | SPR1;  /* SPI on, master mode, SCK = f(OSC) / 64 */
 
 	/* AVR setup */
-	avr_init();
+	if (avr_init())
+		puts("Failed to initialize AVR serial programming mode.\n");
 
 	/* repl */
 	while (1) {

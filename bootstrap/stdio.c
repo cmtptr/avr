@@ -2,13 +2,10 @@
 
 #include "stdio.h"
 
-static __data unsigned char rx_rptr;
-static __data unsigned char rx_wptr;
+static __data unsigned char rx_rptr, rx_wptr;
 static __idata char rx_buf[BUFSIZ];
-static __bit tx_idle = 1;
-static __bit tx_empty = 1;
-static __data unsigned char tx_rptr;
-static __data unsigned char tx_wptr;
+static __bit tx_idle = 1, tx_empty = 1;
+static __data unsigned char tx_rptr, tx_wptr;
 static __idata char tx_buf[BUFSIZ];
 void stdio_isr(void) __interrupt (SI0_VECTOR)
 {
@@ -29,9 +26,8 @@ void stdio_isr(void) __interrupt (SI0_VECTOR)
 		} else {
 			SBUF = tx_buf[tx_rptr++];
 			tx_rptr %= BUFSIZ;
-			if (tx_rptr == tx_wptr) {
+			if (tx_rptr == tx_wptr)
 				tx_empty = 1;
-			}
 		}
 	}
 }

@@ -6,11 +6,11 @@ prog := prog
 
 CC_TARG := sdcc
 CFLAGS_TARG := --model-large
-CPPFLAGS_TARG := --stack-auto --std-c99 -mmcs51
+CPPFLAGS_TARG := --stack-auto --std-c99 -DF_OSC=4915200 -DF_UART=19200 -mmcs51
 LDFLAGS_TARG := --code-size 65536 --iram-size 256 --xram-size 768
 PACKIHX := packihx
 
-sources := bootstrap.c stdio.c string.c
+sources := avr.c bootstrap.c stdio.c string.c
 objects := $(sources:.c=.rel)
 ihx := bootstrap.ihx
 hex := bootstrap.hex
@@ -36,9 +36,11 @@ $(ihx): $(objects)
 	$(CC_TARG) $(CFLAGS_TARG) $(LDFLAGS_TARG) -o $@ $(objects) $(LDADD)
 
 $(hex): $(ihx)
-	$(PACKIHX) >$@ $(ihx)
+	$(PACKIHX) $(ihx) >$@
 
 $(objects): Makefile
-bootstrap.rel: bootstrap.c stdio.h string.h
+avr.rel: avr.c avr.h
+bootstrap.rel: bootstrap.c avr.h stdio.h string.h
+prog.rel: prog.c
 stdio.rel: stdio.c stdio.h
 string.rel: string.c string.h
