@@ -48,17 +48,18 @@ void delay_ms(unsigned short ms)
 /* convert a hexadecimal string to a short integer */
 static short strtoh(const char *nptr, const char **endptr)
 {
-	__bit is_negative;
+	__bit is_negative, is_valid;
+	const char *s = nptr;
 	short val = 0;
-	for (; *nptr && (*nptr < '!' || '~' < *nptr); ++nptr);
-	if (*nptr == '-') {
-		++nptr;
+	for (; *s && (*s < '!' || '~' < *s); ++s);
+	if (*s == '-') {
+		++s;
 		is_negative = 1;
 	} else {
 		is_negative = 0;
 	}
-	for (; *nptr; ++nptr) {
-		char c = *nptr;
+	for (; *s; ++s) {
+		char c = *s;
 		if ('0' <= c && c <= '9')
 			c -= '0';
 		else if ('A' <= c && c <= 'Z')
@@ -67,6 +68,7 @@ static short strtoh(const char *nptr, const char **endptr)
 			c -= 'a' - 0xa;
 		else
 			break;
+		is_valid = 1;
 		if (c >= 0x10)
 			break;
 		val *= 0x10;
@@ -75,7 +77,7 @@ static short strtoh(const char *nptr, const char **endptr)
 	if (is_negative)
 		val = -val;
 	if (endptr)
-		*endptr = nptr;
+		*endptr = is_valid ? s : nptr;
 	return val;
 }
 
@@ -107,25 +109,37 @@ static void eval_hexdump(const char *args, unsigned char len)
 {
 	short start, count, addr, stop;
 	if (!len) {
-		start = 0;
+		goto start_default;
 	} else {
 		const char *end;
 		start = strtoh(args, &end);
+		if (end == args)
+			goto start_default;
 		if ('!' <= *end && *end <= '~')
 			goto usage;
 		len -= end - args;
 		args = end;
 	}
-	if (start < 0)
+	if (0) {
+start_default:
+		start = 0;
+	} else if (start < 0) {
 		start += 0x800;
+	}
 	if (!len) {
-		count = 0x800 - start;
+		goto count_default;
 	} else {
-		count = strtoh(args, &args);
+		const char *end;
+		count = strtoh(args, &end);
+		if (end == args)
+			goto count_default;
 		if ('!' <= *args && *args <= '~')
 			goto usage;
 	}
-	if (count < 0) {
+	if (0) {
+count_default:
+		count = 0x800 - start;
+	} else if (count < 0) {
 		start += count;
 		count = -count;
 	}
