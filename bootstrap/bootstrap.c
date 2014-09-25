@@ -32,6 +32,8 @@ void stdio_isr(void) __interrupt (SI0_VECTOR);
 #define T2CON_EXF2 0x40
 #define T2CON_TF2 0x80
 
+#define IS_WHITESPACE(c) ((c) < '!' || '~' < (c))
+
 /* pretty accurate delay in milliseconds up to 16 seconds */
 void delay_ms(unsigned short ms)
 {
@@ -45,13 +47,28 @@ void delay_ms(unsigned short ms)
 	TR0 = 0;
 }
 
+/* parse a single ASCII hexadecimal character; return zero on success, non-zero
+ * if the character is not valid hexadecimal */
+static __bit parse_hex(char c, unsigned char *dest)
+{
+	if ('0' <= c && c <= '9')
+		*dest = c - '0';
+	else if ('A' <= c && c <= 'F')
+		*dest = c - 'A' + 0xa;
+	else if ('a' <= c && c <= 'f')
+		*dest = c - 'a' + 0xa;
+	else
+		return 1;
+	return 0;
+}
+
 /* convert a hexadecimal string to a short integer */
 static short strtoh(const char *nptr, const char **endptr)
 {
-	__bit is_negative, is_valid;
+	__bit is_negative, is_valid = 0;
 	const char *s = nptr;
 	short val = 0;
-	for (; *s && (*s < '!' || '~' < *s); ++s);
+	for (; *s && IS_WHITESPACE(*s); ++s);
 	if (*s == '-') {
 		++s;
 		is_negative = 1;
@@ -59,18 +76,10 @@ static short strtoh(const char *nptr, const char **endptr)
 		is_negative = 0;
 	}
 	for (; *s; ++s) {
-		char c = *s;
-		if ('0' <= c && c <= '9')
-			c -= '0';
-		else if ('A' <= c && c <= 'Z')
-			c -= 'A' - 0xa;
-		else if ('a' <= c && c <= 'z')
-			c -= 'a' - 0xa;
-		else
+		unsigned char c;
+		if (parse_hex(*s, &c))
 			break;
 		is_valid = 1;
-		if (c >= 0x10)
-			break;
 		val *= 0x10;
 		val += c;
 	}
@@ -89,23 +98,49 @@ static void print_hex(unsigned char c)
 	putchar(l + (l > 9 ? 'a' - 0xa : '0'));
 }
 
-static void eval_erase(const char *args, unsigned char len)
+static __bit eval_erase(const char *args, unsigned char len)
 {
 	char c;
 	(void)args;
 	(void)len;
 	puts("This will erase all program memory and EEPROM!!"
 			"  Are you sure? [y/N]: ");
-	while (c = getchar(), c < '!' && '~' < c && c != '\r');
+	while (c = getchar(), IS_WHITESPACE(c) && c != '\r');
 	putchar(c);
 	putchar('\n');
 	if (c == 'y' || c == 'Y')
 		avr_erase();
 	else
 		puts("aborted\n");
+	return 0;
 }
 
-static void eval_hexdump(const char *args, unsigned char len)
+static __bit eval_read(const char *args, unsigned char len)
+{
+	const char *end;
+	unsigned short addr, stop;
+	if (!len)
+		return 1;
+	addr = strtoh(args, &end);
+	if (end == args || !IS_WHITESPACE(*end))
+		return 1;
+	if (addr & 0x1f) {
+		puts("read: ");
+		print_hex(addr >> 8);
+		print_hex(addr & 0xff);
+		puts(" is not on a page boundary\n");
+		return 0;
+	}
+	print_hex(addr >> 8);
+	print_hex(addr & 0xff);
+	putchar(' ');
+	for (stop = addr + 0x20; addr < stop; ++addr)
+		print_hex(avr_read(addr));
+	putchar('\n');
+	return 0;
+}
+
+static __bit eval_hexdump(const char *args, unsigned char len)
 {
 	short start, count, addr, stop;
 	if (!len) {
@@ -115,8 +150,8 @@ static void eval_hexdump(const char *args, unsigned char len)
 		start = strtoh(args, &end);
 		if (end == args)
 			goto start_default;
-		if ('!' <= *end && *end <= '~')
-			goto usage;
+		if (!IS_WHITESPACE(*end))
+			return 1;
 		len -= end - args;
 		args = end;
 	}
@@ -133,8 +168,8 @@ start_default:
 		count = strtoh(args, &end);
 		if (end == args)
 			goto count_default;
-		if ('!' <= *args && *args <= '~')
-			goto usage;
+		if (!IS_WHITESPACE(*end))
+			return 1;
 	}
 	if (0) {
 count_default:
@@ -162,7 +197,7 @@ count_default:
 				unsigned char c = avr_read(i);
 				print_hex(c);
 				putchar(' ');
-				buf[i - addr] = '!' <= c && c <= '~' ? c : '.';
+				buf[i - addr] = !IS_WHITESPACE(c) ? c : '.';
 			}
 		}
 		putchar(' ');
@@ -174,7 +209,7 @@ count_default:
 				unsigned char c = avr_read(i);
 				print_hex(c);
 				putchar(' ');
-				buf[i - addr] = '!' <= c && c <= '~' ? c : '.';
+				buf[i - addr] = !IS_WHITESPACE(c) ? c : '.';
 			}
 		}
 		buf[sizeof buf - 1] = '\0';
@@ -182,20 +217,54 @@ count_default:
 		puts(buf);
 		puts("|\n");
 	}
-	return;
-usage:
-	puts("usage: hexdump [<addr> [<count>]]\n");
+	return 0;
 }
 
-static void eval_spi(const char *args, unsigned char len)
+static __bit eval_write(const char *args, unsigned char len)
+{
+	const char *end;
+	unsigned short addr;
+	unsigned char i, data[0x20];
+	if (!len)
+		return 1;
+	addr = strtoh(args, &end);
+	if (end == args || !*end || !IS_WHITESPACE(*end))
+		return 1;
+	if (addr & 0x1f) {
+		puts("write: ");
+		print_hex(addr >> 8);
+		print_hex(addr & 0xff);
+		puts(" is not on a page boundary\n");
+		return 0;
+	}
+	for (args = end; *args && IS_WHITESPACE(*args); ++args);
+	for (i = 0; i < sizeof data; ++i) {
+		unsigned char val;
+		if (parse_hex(*args++, &val) || parse_hex(*args++, data + i))
+			goto error_parse;
+		data[i] += val * 0x10;
+	}
+	if (*args)
+		goto error_parse;
+	for (i = 0; i < sizeof data; ++i)
+		avr_load(addr + i, data[i]);
+	avr_write(addr);
+	if (0) {
+error_parse:
+		puts("write: error parsing page data\n");
+	}
+	return 0;
+}
+
+static __bit eval_spi(const char *args, unsigned char len)
 {
 	unsigned char i, buf[4];
 	(void)len;
 	for (i = 0; i < sizeof buf; ++i) {
 		const char *end;
 		buf[i] = strtoh(args, &end);
-		if (end == args || ('!' <= *end && *end <= '~'))
-			goto usage;
+		if (end == args || !IS_WHITESPACE(*end))
+			return 1;
 		args = end;
 	}
 	avr_spi(buf, buf);
@@ -204,35 +273,61 @@ static void eval_spi(const char *args, unsigned char len)
 		putchar(' ');
 	}
 	putchar('\n');
-	return;
-usage:
-	puts("usage: spi <byte1> <byte2> <byte3> <byte4>\n");
+	return 0;
+}
+
+static void usage(const char *prefix, const char *cmd, const char *args)
+{
+	puts(prefix);
+	puts(cmd);
+	putchar(' ');
+	puts(args);
+	putchar('\n');
 }
 
 static void eval(char *buffer, unsigned char len)
 {
 	static struct {
 		unsigned char len;
-		const char *key;
-		void (*vector)(const char *, unsigned char);
+		const char *cmd;
+		const char *args;
+		__bit (*vector)(const char *, unsigned char);
 	} vectors[] = {
-		{5, "erase", eval_erase},
-		{7, "hexdump", eval_hexdump},
-		{3, "spi", eval_spi},
+#define VECTORS_ENTRY(cmd, args) {sizeof (#cmd) - 1, #cmd, args, eval_##cmd}
+		VECTORS_ENTRY(erase, ""),
+		VECTORS_ENTRY(read, "<page addr>"),
+		VECTORS_ENTRY(hexdump, "[<addr> [<count>]]"),
+		VECTORS_ENTRY(write, "<page addr> <page data>"),
+		VECTORS_ENTRY(spi, "<byte1> <byte2> <byte3> <byte4>"),
 	};
 	unsigned char i, key_len = strcspn(buffer, " ");
 	for (i = 0; i < sizeof vectors / sizeof *vectors; ++i) {
 		if (key_len == vectors[i].len
-				&& !strncmp(buffer, vectors[i].key, key_len)) {
-			for (; buffer[key_len] == ' '; ++key_len);
-			vectors[i].vector(buffer + key_len, len - key_len);
+				&& !strncmp(buffer, vectors[i].cmd, key_len)) {
+			for (; buffer[key_len]
+					&& IS_WHITESPACE(buffer[key_len]);
+					++key_len);
+			if ((len > key_len
+					&& !strncmp(buffer + key_len, "help", 4)
+					&& IS_WHITESPACE(buffer[key_len + 4]))
+					|| vectors[i].vector(buffer + key_len,
+						len - key_len)) {
+				puts("usage: ");
+				usage("", vectors[i].cmd, vectors[i].args);
+			}
 			return;
 		}
 	}
-	puts("invalid command \"");
-	buffer[key_len] = '\0';
-	puts(buffer);
-	puts("\"\n");
+	if (!strncmp(buffer, "help", 4) && IS_WHITESPACE(buffer[4])) {
+		puts("available commands:\n");
+		for (i = 0; i < sizeof vectors / sizeof *vectors; ++i)
+			usage(" ", vectors[i].cmd, vectors[i].args);
+	} else {
+		puts("invalid command \"");
+		buffer[key_len] = '\0';
+		puts(buffer);
+		puts("\"\n");
+	}
 }
 
 void main(void)
@@ -260,7 +355,7 @@ void main(void)
 
 	/* repl */
 	while (1) {
-		static char buffer[BUFSIZ];
+		static char buffer[81];
 		char ptr = 0;
 		puts("> ");
 		while (1) {
@@ -273,19 +368,20 @@ void main(void)
 				--ptr;
 				puts("\x8 \x8");
 			} else {
-				if (ptr >= BUFSIZ - 1)
+				if (ptr >= sizeof buffer - 1)
 					continue;
 				buffer[ptr++] = c;
 				putchar(c);
 			}
 		}
 		putchar('\n');
-		for (--ptr; ptr > 0 && buffer[ptr] < '!' || '~' < buffer[ptr];
-				--ptr);
+		for (--ptr; ptr > 0 && IS_WHITESPACE(buffer[ptr]); --ptr);
 		if (++ptr) {
 			char leading;
 			buffer[ptr] = '\0';
-			for (leading = 0; buffer[leading] == ' '; ++leading);
+			for (leading = 0; buffer[leading]
+					&& IS_WHITESPACE(buffer[leading]);
+					++leading);
 			if (leading < ptr)
 				eval(buffer + leading, ptr - leading);
 		}

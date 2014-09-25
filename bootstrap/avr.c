@@ -67,7 +67,6 @@ static __bit is_rdy(void)
 /* manually issue AVR serial programming instructions */
 void avr_spi(const char *tx, char *rx)
 {
-	while (!is_rdy());
 	spi_xcv_l(tx, rx, 4);
 }
 
@@ -76,8 +75,8 @@ void avr_erase(void)
 {
 	static const unsigned char tx[] = {0xac, 0x80, 0, 0};
 	unsigned char rx[sizeof tx];
-	while (!is_rdy());
 	spi_xcv(tx, rx);
+	while (!is_rdy());
 }
 
 /* read an arbitrary byte address from program memory */
@@ -85,9 +84,34 @@ unsigned char avr_read(unsigned short addr)
 {
 	unsigned char buf[4] = {
 		addr % 2 ? 0x28 : 0x20,
-		addr / 0x200,
+		addr / 2 / 0x100,
 		addr / 2 & 0xff,
 	};
 	spi_xcv(buf, buf);
 	return buf[3];
+}
+
+/* load a byte value to the temporary page buffer */
+void avr_load(unsigned short addr, unsigned char value)
+{
+	unsigned char buf[4] = {
+		addr % 2 ? 0x48 : 0x40,
+		addr / 2 / 0x100,
+		addr / 2 & 0xff,
+		value,
+	};
+	spi_xcv(buf, buf);
+}
+
+/* write the temporary page buffer to program memory */
+void avr_write(unsigned short addr)
+{
+	unsigned char buf[4] = {
+		0x4c,
+		addr / 2 / 0x100,
+		addr / 2 & 0xff,
+		0,
+	};
+	spi_xcv(buf, buf);
+	while (!is_rdy());
 }

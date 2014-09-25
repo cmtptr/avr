@@ -8,5 +8,7 @@ void avr_spi(const char *, char *);
 void avr_erase(void);
 void avr_hexdump(unsigned short, unsigned short);
 unsigned char avr_read(unsigned short);
+void avr_load(unsigned short, unsigned char);
+void avr_write(unsigned short);
 
 #endif
