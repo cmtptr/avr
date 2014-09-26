@@ -70,6 +70,14 @@ void avr_spi(const char *tx, char *rx)
 	spi_xcv_l(tx, rx, 4);
 }
 
+/* read a device signature byte */
+unsigned char avr_signature(unsigned char addr)
+{
+	unsigned char buf[4] = {0x30, 0, addr % 0x3};
+	spi_xcv(buf, buf);
+	return buf[3];
+}
+
 /* send a chip-erase instruction */
 void avr_erase(void)
 {
@@ -80,7 +88,7 @@ void avr_erase(void)
 }
 
 /* read an arbitrary byte address from program memory */
-unsigned char avr_read(unsigned short addr)
+unsigned char avr_flash_read(unsigned short addr)
 {
 	unsigned char buf[4] = {
 		addr % 2 ? 0x28 : 0x20,
@@ -92,7 +100,7 @@ unsigned char avr_read(unsigned short addr)
 }
 
 /* load a byte value to the temporary page buffer */
-void avr_load(unsigned short addr, unsigned char value)
+void avr_flash_load(unsigned short addr, unsigned char value)
 {
 	unsigned char buf[4] = {
 		addr % 2 ? 0x48 : 0x40,
@@ -104,7 +112,7 @@ void avr_load(unsigned short addr, unsigned char value)
 }
 
 /* write the temporary page buffer to program memory */
-void avr_write(unsigned short addr)
+void avr_flash_write(unsigned short addr)
 {
 	unsigned char buf[4] = {
 		0x4c,
@@ -114,4 +122,19 @@ void avr_write(unsigned short addr)
 	};
 	spi_xcv(buf, buf);
 	while (!is_rdy());
+}
+
+/* read from an arbitrary byte address in EEPROM */
+unsigned char avr_eeprom_read(unsigned char addr)
+{
+	unsigned char buf[4] = {0xa0, 0, addr};
+	spi_xcv(buf, buf);
+	return buf[3];
+}
+
+/* write to an arbitrary byte address in EEPROM */
+void avr_eeprom_write(unsigned char addr, unsigned char value)
+{
+	unsigned char buf[4] = {0xc0, 0, addr, value};
+	spi_xcv(buf, buf);
 }

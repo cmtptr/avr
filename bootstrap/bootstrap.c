@@ -98,6 +98,55 @@ static void print_hex(unsigned char c)
 	putchar(l + (l > 9 ? 'a' - 0xa : '0'));
 }
 
+static __bit eval_eeprom(const char *args, unsigned char len)
+{
+	const char *end;
+	unsigned char addr, value;
+	if (!len) {
+		for (addr = 0; addr < 0x80; addr += 0x10) {
+			unsigned char i, j, buf[0x10 + 1];
+			puts("  ");
+			print_hex(addr);
+			puts("  ");
+			for (i = addr, j = addr + 8; i < j; ++i) {
+				unsigned char c = avr_eeprom_read(i);
+				print_hex(c);
+				putchar(' ');
+				buf[i - addr] = !IS_WHITESPACE(c) || c == ' ' ?
+					c : '.';
+			}
+			putchar(' ');
+			for (j += 8; i < j; ++i) {
+				unsigned char c = avr_eeprom_read(i);
+				print_hex(c);
+				putchar(' ');
+				buf[i - addr] = !IS_WHITESPACE(c) || c == ' ' ?
+					c : '.';
+			}
+			buf[sizeof buf - 1] = '\0';
+			puts("  |");
+			puts(buf);
+			puts("|\n");
+		}
+		return 0;
+	}
+	addr = strtoh(args, &end);
+	if (end == args || !IS_WHITESPACE(*end))
+		return 1;
+	for (args = end; IS_WHITESPACE(*args); ++args)
+		if (!*args) {
+			print_hex(avr_eeprom_read(addr));
+			putchar('\n');
+			return 0;
+		}
+	value = strtoh(args, &args);
+	if (*args && !IS_WHITESPACE(*args))
+		puts("eeprom: error parsing byte value\n");
+	else
+		avr_eeprom_write(addr, value);
+	return 0;
+}
+
 static __bit eval_erase(const char *args, unsigned char len)
 {
 	char c;
@@ -115,29 +164,62 @@ static __bit eval_erase(const char *args, unsigned char len)
 	return 0;
 }
 
-static __bit eval_read(const char *args, unsigned char len)
+static __bit eval_flash_read(unsigned short addr)
+{
+	unsigned short stop;
+	print_hex(addr >> 8);
+	print_hex(addr & 0xff);
+	putchar(' ');
+	for (stop = addr + 0x20; addr < stop; ++addr)
+		print_hex(avr_flash_read(addr));
+	putchar('\n');
+	return 0;
+}
+
+static __bit eval_flash_write(const char *args, unsigned char len,
+		unsigned short addr)
+{
+	unsigned char i, data[0x20];
+	if (!len)
+		return 1;
+	for (i = 0; i < sizeof data; ++i) {
+		unsigned char val;
+		if (parse_hex(*args++, &val) || parse_hex(*args++, data + i))
+			goto error_parse;
+		data[i] += val * 0x10;
+	}
+	if (*args && !IS_WHITESPACE(*args))
+		goto error_parse;
+	for (i = 0; i < sizeof data; ++i)
+		avr_flash_load(addr + i, data[i]);
+	avr_flash_write(addr);
+	if (0) {
+error_parse:
+		puts("flash: error parsing page data\n");
+	}
+	return 0;
+}
+
+static __bit eval_flash(const char *args, unsigned char len)
 {
 	const char *end;
-	unsigned short addr, stop;
+	unsigned short addr;
 	if (!len)
 		return 1;
 	addr = strtoh(args, &end);
 	if (end == args || !IS_WHITESPACE(*end))
 		return 1;
 	if (addr & 0x1f) {
-		puts("read: ");
+		puts("flash: ");
 		print_hex(addr >> 8);
 		print_hex(addr & 0xff);
 		puts(" is not on a page boundary\n");
 		return 0;
 	}
-	print_hex(addr >> 8);
-	print_hex(addr & 0xff);
-	putchar(' ');
-	for (stop = addr + 0x20; addr < stop; ++addr)
-		print_hex(avr_read(addr));
-	putchar('\n');
-	return 0;
+	for (; IS_WHITESPACE(*end); ++end)
+		if (!*end)
+			return eval_flash_read(addr);
+	return eval_flash_write(end, args + len - end, addr);
 }
 
 static __bit eval_hexdump(const char *args, unsigned char len)
@@ -194,10 +276,11 @@ count_default:
 				puts("   ");
 				buf[i - addr] = ' ';
 			} else {
-				unsigned char c = avr_read(i);
+				unsigned char c = avr_flash_read(i);
 				print_hex(c);
 				putchar(' ');
-				buf[i - addr] = !IS_WHITESPACE(c) ? c : '.';
+				buf[i - addr] = !IS_WHITESPACE(c) || c == ' ' ?
+					c : '.';
 			}
 		}
 		putchar(' ');
@@ -206,10 +289,11 @@ count_default:
 				puts("   ");
 				buf[i - addr] = ' ';
 			} else {
-				unsigned char c = avr_read(i);
+				unsigned char c = avr_flash_read(i);
 				print_hex(c);
 				putchar(' ');
-				buf[i - addr] = !IS_WHITESPACE(c) ? c : '.';
+				buf[i - addr] = !IS_WHITESPACE(c) || c == ' ' ?
+					c : '.';
 			}
 		}
 		buf[sizeof buf - 1] = '\0';
@@ -220,39 +304,60 @@ count_default:
 	return 0;
 }
 
-static __bit eval_write(const char *args, unsigned char len)
+static __bit eval_raw(const char *args, unsigned char len)
 {
-	const char *end;
-	unsigned short addr;
-	unsigned char i, data[0x20];
-	if (!len)
-		return 1;
-	addr = strtoh(args, &end);
-	if (end == args || !*end || !IS_WHITESPACE(*end))
-		return 1;
-	if (addr & 0x1f) {
-		puts("write: ");
-		print_hex(addr >> 8);
-		print_hex(addr & 0xff);
-		puts(" is not on a page boundary\n");
-		return 0;
-	}
-	for (args = end; *args && IS_WHITESPACE(*args); ++args);
-	for (i = 0; i < sizeof data; ++i) {
-		unsigned char val;
-		if (parse_hex(*args++, &val) || parse_hex(*args++, data + i))
-			goto error_parse;
-		data[i] += val * 0x10;
-	}
-	if (*args)
-		goto error_parse;
-	for (i = 0; i < sizeof data; ++i)
-		avr_load(addr + i, data[i]);
-	avr_write(addr);
-	if (0) {
-error_parse:
-		puts("write: error parsing page data\n");
-	}
+	char c;
+	(void)args;
+	(void)len;
+	do {
+		c = getchar();
+		switch (c) {
+		case '?':  /* are you there? */
+		case 'q':  /* quit */
+			break;
+
+		case 'E':  /* erase */
+			avr_erase();
+			break;
+
+		case 'e': {  /* TODO eeprom write */
+			putchar('e');
+			break;
+		}
+
+		case 'f': {  /* flash write */
+			unsigned short addr;
+			unsigned char i;
+			putchar('f');
+			addr = getchar() * 0x10;
+			addr += getchar();
+			if (addr & 0x1f)
+				goto error;
+			for (i = 0; i < 0x20; ++i)
+				avr_flash_load(addr + i, getchar());
+			avr_flash_write(addr);
+			break;
+		}
+
+		default:
+			goto error;
+		}
+		putchar('.');
+		continue;
+error:
+		putchar('!');
+	} while (c != 'q');
+	return 0;
+}
+
+static __bit eval_signature(const char *args, unsigned char len)
+{
+	unsigned char i;
+	(void)args;
+	(void)len;
+	for (i = 0; i < 3; ++i)
+		print_hex(avr_signature(i));
+	putchar('\n');
 	return 0;
 }
 
@@ -278,10 +383,13 @@ static __bit eval_spi(const char *args, unsigned char len)
 
 static void usage(const char *prefix, const char *cmd, const char *args)
 {
-	puts(prefix);
+	if (prefix)
+		puts(prefix);
 	puts(cmd);
-	putchar(' ');
-	puts(args);
+	if (args) {
+		putchar(' ');
+		puts(args);
+	}
 	putchar('\n');
 }
 
@@ -294,10 +402,12 @@ static void eval(char *buffer, unsigned char len)
 		__bit (*vector)(const char *, unsigned char);
 	} vectors[] = {
 #define VECTORS_ENTRY(cmd, args) {sizeof (#cmd) - 1, #cmd, args, eval_##cmd}
-		VECTORS_ENTRY(erase, ""),
-		VECTORS_ENTRY(read, "<page addr>"),
+		VECTORS_ENTRY(eeprom, "[<addr> [<value>]]"),
+		VECTORS_ENTRY(erase, 0),
+		VECTORS_ENTRY(flash, "<addr> [<data>]"),
 		VECTORS_ENTRY(hexdump, "[<addr> [<count>]]"),
-		VECTORS_ENTRY(write, "<page addr> <page data>"),
+		VECTORS_ENTRY(raw, 0),
+		VECTORS_ENTRY(signature, 0),
 		VECTORS_ENTRY(spi, "<byte1> <byte2> <byte3> <byte4>"),
 	};
 	unsigned char i, key_len = strcspn(buffer, " ");
@@ -313,7 +423,7 @@ static void eval(char *buffer, unsigned char len)
 					|| vectors[i].vector(buffer + key_len,
 						len - key_len)) {
 				puts("usage: ");
-				usage("", vectors[i].cmd, vectors[i].args);
+				usage(0, vectors[i].cmd, vectors[i].args);
 			}
 			return;
 		}
