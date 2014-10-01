@@ -2,8 +2,28 @@
 
 #include "avr.h"
 
-/* TODO delay_ms needs to be exposed by a header somewhere */
-void delay_ms(unsigned short);
+/* pretty accurate delay in milliseconds up to 16 seconds */
+static void delay_ms(unsigned short ms)
+{
+	ms = (ms << 2) + 1;  /* 1000us / 250us */
+	TL0 = TH0;
+	TR0 = 1;
+	do {
+		while (!TF0);
+		TF0 = 0;
+	} while (--ms);
+	TR0 = 0;
+}
+
+/* send a reset pulse to the AVR */
+static __bit prog_en;
+void avr_reset(void)
+{
+	AVR_RESET = 0;
+	delay_ms(1);
+	AVR_RESET = 1;
+	prog_en = 0;
+}
 
 /* transmit/receive on the SPI */
 #define spi_xcv(tx, rx) spi_xcv_l(tx, rx, sizeof tx)
@@ -19,9 +39,15 @@ static void spi_xcv_l(const unsigned char *tx, unsigned char *rx,
 	}
 }
 
+/* test whether the AVR is in serial programming mode */
+__bit avr_is_programming_enabled(void)
+{
+	return prog_en;
+}
+
 /* put the AVR into serial programming mode; return zero on success, or non-zero
  * on failure */
-__bit avr_init(void)
+__bit avr_programming_enable(void)
 {
 	static const unsigned char tx[] = {0xac, 0x53, 0, 0};
 	unsigned char i, rx[sizeof tx];
@@ -49,8 +75,10 @@ __bit avr_init(void)
 		 * transmitted. If the 0x53 did not echo back, give RESET a
 		 * positive pulse and issue a new Programming Enable command." */
 		spi_xcv(tx, rx);
-		if (rx[2] == tx[1])
+		if (rx[2] == tx[1]) {
+			prog_en = 1;
 			return 0;
+		}
 	}
 	return 1;
 }
@@ -137,4 +165,5 @@ void avr_eeprom_write(unsigned char addr, unsigned char value)
 {
 	unsigned char buf[4] = {0xc0, 0, addr, value};
 	spi_xcv(buf, buf);
+	while (!is_rdy());
 }

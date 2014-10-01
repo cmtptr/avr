@@ -2,7 +2,6 @@
 
 #include "avr.h"
 #include "stdio.h"
-#include "string.h"
 void stdio_isr(void) __interrupt (SI0_VECTOR);
 
 #define SCON_RI 0x01
@@ -33,19 +32,6 @@ void stdio_isr(void) __interrupt (SI0_VECTOR);
 #define T2CON_TF2 0x80
 
 #define IS_WHITESPACE(c) ((c) < '!' || '~' < (c))
-
-/* pretty accurate delay in milliseconds up to 16 seconds */
-void delay_ms(unsigned short ms)
-{
-	ms = (ms << 2) + 1;  /* 1000us / 250us */
-	TL0 = TH0;
-	TR0 = 1;
-	do {
-		while (!TF0);
-		TF0 = 0;
-	} while (--ms);
-	TR0 = 0;
-}
 
 /* parse a single ASCII hexadecimal character; return zero on success, non-zero
  * if the character is not valid hexadecimal */
@@ -98,10 +84,75 @@ static void print_hex(unsigned char c)
 	putchar(l + (l > 9 ? 'a' - 0xa : '0'));
 }
 
+static char strncmp(const char *s1, const char *s2, unsigned char n)
+{
+	unsigned char i;
+	for (i = 0; i < n; ++i) {
+		char dc = s1[i] - s2[i];
+		if (dc)
+			return dc;
+	}
+	return 0;
+}
+
+static __bit ihex(const char *buf, unsigned char len)
+{
+	static unsigned short page = 0xffff;
+	static unsigned char data[0x20];
+	unsigned char i, checksum = buf[len + 4];
+	unsigned short addr;
+	if (!avr_is_programming_enabled())
+		return 1;
+	for (i = 0; i < len + 4; ++i)
+		checksum += buf[i];
+	if (checksum)  /* checksum  error */
+		return 1;
+	addr = buf[1] * 0x100 + buf[2];
+	if (addr & 0xf)  /* address must be on a boundary of 16 */
+		return 1;
+	if (!buf[3]) {
+		/* data */
+		unsigned char *ptr;
+		unsigned short newpage = addr & ~0x1f;
+		if (newpage != page) {
+			if (page != 0xffff) {
+				for (i = 0; i < sizeof data; ++i)
+					avr_flash_load(page + i, data[i]);
+				avr_flash_write(page);
+			}
+			for (i = 0; i < sizeof data; ++i)
+				data[i] = 0xff;
+			page = newpage;
+		}
+		ptr = data + (addr & 0x10);
+		for (i = 0; i < len; ++i)
+			ptr[i] = buf[i + 4];
+	} else if (buf[3] == 1) {
+		/* end of file */
+		if (page != 0xffff) {
+			for (i = 0; i < sizeof data; ++i)
+				avr_flash_load(page + i, data[i]);
+			avr_flash_write(page);
+		}
+		for (i = 0; i < sizeof data; ++i)
+			data[i] = 0xff;
+		page = 0xffff;
+	} else {
+		/* unrecognized type */
+		return 1;
+	}
+	return 0;
+}
+
 static __bit eval_eeprom(const char *args, unsigned char len)
 {
 	const char *end;
 	unsigned char addr, value;
+	if (!avr_is_programming_enabled()) {
+		puts("eeprom: device is not in serial programming mode;"
+				" use \"reset prog\"\n");
+		return 0;
+	}
 	if (!len) {
 		for (addr = 0; addr < 0x80; addr += 0x10) {
 			unsigned char i, j, buf[0x10 + 1];
@@ -152,6 +203,11 @@ static __bit eval_erase(const char *args, unsigned char len)
 	char c;
 	(void)args;
 	(void)len;
+	if (!avr_is_programming_enabled()) {
+		puts("erase: device is not in serial programming mode;"
+				" use \"reset prog\"\n");
+		return 0;
+	}
 	puts("This will erase all program memory and EEPROM!!"
 			"  Are you sure? [y/N]: ");
 	while (c = getchar(), IS_WHITESPACE(c) && c != '\r');
@@ -182,16 +238,22 @@ static __bit eval_flash_write(const char *args, unsigned char len,
 	unsigned char i, data[0x20];
 	if (!len)
 		return 1;
-	for (i = 0; i < sizeof data; ++i) {
+	for (len = 0; len < sizeof data; ++len) {
 		unsigned char val;
-		if (parse_hex(*args++, &val) || parse_hex(*args++, data + i))
+		if (parse_hex(*args, &val))
+			break;
+		++args;
+		if (parse_hex(*args, data + len))
 			goto error_parse;
-		data[i] += val * 0x10;
+		++args;
+		data[len] += val * 0x10;
 	}
-	if (*args && !IS_WHITESPACE(*args))
+	if (!len || *args && !IS_WHITESPACE(*args))
 		goto error_parse;
-	for (i = 0; i < sizeof data; ++i)
+	for (i = 0; i < len; ++i)
 		avr_flash_load(addr + i, data[i]);
+	if (i % 2)  /* always write a complete word */
+		avr_flash_load(addr + i, 0xff);
 	avr_flash_write(addr);
 	if (0) {
 error_parse:
@@ -216,6 +278,11 @@ static __bit eval_flash(const char *args, unsigned char len)
 		puts(" is not on a page boundary\n");
 		return 0;
 	}
+	if (!avr_is_programming_enabled()) {
+		puts("flash: device is not in serial programming mode;"
+				" use \"reset prog\"\n");
+		return 0;
+	}
 	for (; IS_WHITESPACE(*end); ++end)
 		if (!*end)
 			return eval_flash_read(addr);
@@ -225,6 +292,11 @@ static __bit eval_flash(const char *args, unsigned char len)
 static __bit eval_hexdump(const char *args, unsigned char len)
 {
 	short start, count, addr, stop;
+	if (!avr_is_programming_enabled()) {
+		puts("hexdump: device is not in serial programming mode;"
+				" use \"reset prog\"\n");
+		return 0;
+	}
 	if (!len) {
 		goto start_default;
 	} else {
@@ -304,49 +376,14 @@ count_default:
 	return 0;
 }
 
-static __bit eval_raw(const char *args, unsigned char len)
+static __bit eval_reset(const char *args, unsigned char len)
 {
-	char c;
-	(void)args;
-	(void)len;
-	do {
-		c = getchar();
-		switch (c) {
-		case '?':  /* are you there? */
-		case 'q':  /* quit */
-			break;
-
-		case 'E':  /* erase */
-			avr_erase();
-			break;
-
-		case 'e': {  /* TODO eeprom write */
-			putchar('e');
-			break;
-		}
-
-		case 'f': {  /* flash write */
-			unsigned short addr;
-			unsigned char i;
-			putchar('f');
-			addr = getchar() * 0x10;
-			addr += getchar();
-			if (addr & 0x1f)
-				goto error;
-			for (i = 0; i < 0x20; ++i)
-				avr_flash_load(addr + i, getchar());
-			avr_flash_write(addr);
-			break;
-		}
-
-		default:
-			goto error;
-		}
-		putchar('.');
-		continue;
-error:
-		putchar('!');
-	} while (c != 'q');
+	if (!len)
+		avr_reset();
+	else if (strncmp(args, "prog", 4) || !IS_WHITESPACE(args[4]))
+		return 1;
+	else if (avr_programming_enable())
+		puts("reset: failed to initialize AVR serial programming mode\n");
 	return 0;
 }
 
@@ -355,6 +392,11 @@ static __bit eval_signature(const char *args, unsigned char len)
 	unsigned char i;
 	(void)args;
 	(void)len;
+	if (!avr_is_programming_enabled()) {
+		puts("signature: device is not in serial programming mode;"
+				" use \"reset prog\"\n");
+		return 0;
+	}
 	for (i = 0; i < 3; ++i)
 		print_hex(avr_signature(i));
 	putchar('\n');
@@ -371,6 +413,11 @@ static __bit eval_spi(const char *args, unsigned char len)
 		if (end == args || !IS_WHITESPACE(*end))
 			return 1;
 		args = end;
+	}
+	if (!avr_is_programming_enabled()) {
+		puts("spi: device is not in serial programming mode;"
+				" use \"reset prog\"\n");
+		return 0;
 	}
 	avr_spi(buf, buf);
 	for (i = 0; i < sizeof buf; ++i) {
@@ -393,9 +440,9 @@ static void usage(const char *prefix, const char *cmd, const char *args)
 	putchar('\n');
 }
 
-static void eval(char *buffer, unsigned char len)
+static void eval(char *buf, unsigned char len)
 {
-	static struct {
+	static const struct {
 		unsigned char len;
 		const char *cmd;
 		const char *args;
@@ -406,21 +453,22 @@ static void eval(char *buffer, unsigned char len)
 		VECTORS_ENTRY(erase, 0),
 		VECTORS_ENTRY(flash, "<addr> [<data>]"),
 		VECTORS_ENTRY(hexdump, "[<addr> [<count>]]"),
-		VECTORS_ENTRY(raw, 0),
+		VECTORS_ENTRY(reset, "[prog]"),
 		VECTORS_ENTRY(signature, 0),
 		VECTORS_ENTRY(spi, "<byte1> <byte2> <byte3> <byte4>"),
 	};
-	unsigned char i, key_len = strcspn(buffer, " ");
+	unsigned char i, key_len;
+	for (key_len = 0; !IS_WHITESPACE(buf[key_len]); ++key_len);
 	for (i = 0; i < sizeof vectors / sizeof *vectors; ++i) {
 		if (key_len == vectors[i].len
-				&& !strncmp(buffer, vectors[i].cmd, key_len)) {
-			for (; buffer[key_len]
-					&& IS_WHITESPACE(buffer[key_len]);
+				&& !strncmp(buf, vectors[i].cmd, key_len)) {
+			for (; buf[key_len]
+					&& IS_WHITESPACE(buf[key_len]);
 					++key_len);
 			if ((len > key_len
-					&& !strncmp(buffer + key_len, "help", 4)
-					&& IS_WHITESPACE(buffer[key_len + 4]))
-					|| vectors[i].vector(buffer + key_len,
+					&& !strncmp(buf + key_len, "help", 4)
+					&& IS_WHITESPACE(buf[key_len + 4]))
+					|| vectors[i].vector(buf + key_len,
 						len - key_len)) {
 				puts("usage: ");
 				usage(0, vectors[i].cmd, vectors[i].args);
@@ -428,23 +476,21 @@ static void eval(char *buffer, unsigned char len)
 			return;
 		}
 	}
-	if (!strncmp(buffer, "help", 4) && IS_WHITESPACE(buffer[4])) {
-		puts("available commands:\n");
+	if (!strncmp(buf, "help", 4) && IS_WHITESPACE(buf[4])) {
+		puts("usage: <:Intel HEX record> | <command> [<args>...]\n"
+				"available commands:\n");
 		for (i = 0; i < sizeof vectors / sizeof *vectors; ++i)
 			usage(" ", vectors[i].cmd, vectors[i].args);
 	} else {
 		puts("invalid command \"");
-		buffer[key_len] = '\0';
-		puts(buffer);
-		puts("\"\n");
+		buf[key_len] = '\0';
+		puts(buf);
+		puts("\"; enter \"help\" for a list of recognized commands\n");
 	}
 }
 
 void main(void)
 {
-	/* hold the AVR in reset */
-	AVR_RESET = 0;
-
 	/* delay timer setup */
 	TMOD = T0_M1;  /* timer 0 in 8-bit auto-reload mode */
 	TH0 = -F_OSC / 12 / 4000;  /* 250-us timer */
@@ -459,41 +505,75 @@ void main(void)
 	/* SPI setup */
 	SPCR = SPE | MSTR | SPR1;  /* SPI on, master mode, SCK = f(OSC) / 64 */
 
-	/* AVR setup */
-	if (avr_init())
-		puts("Failed to initialize AVR serial programming mode.\n");
-
 	/* repl */
 	while (1) {
-		static char buffer[81];
-		char ptr = 0;
+		static char buf[81];
+		char ptr = 0, ihex_len = 0;  /* in Intel HEX input mode? */
+		unsigned char len = 0xff;  /* ihex record data length */
 		puts("> ");
 		while (1) {
 			char c = getchar();
-			if (c == '\r')
+			if (!ihex_len && c == '\r')
 				break;
 			if (c == 0x7f || c == 8) {
 				if (!ptr)
 					continue;
 				--ptr;
+				if (ihex_len) {
+					if (!ptr)
+						ihex_len = 0;
+					else if (ptr == 2)
+						len = 0xff;
+				}
 				puts("\x8 \x8");
-			} else {
-				if (ptr >= sizeof buffer - 1)
-					continue;
-				buffer[ptr++] = c;
+			} else if (ihex_len) {
+				if (parse_hex(c, buf + ptr)) {
+					putchar('X');
+					break;
+				}
 				putchar(c);
+				if (++ptr == 3) {
+					len = buf[1] * 0x10 + buf[2];
+					if (len > 0x10) {
+						putchar('X');
+						break;
+					}
+					/* track the expected buf[] length */
+					ihex_len = 1 + 2 * (len + 5);
+				} else if (ptr == ihex_len) {
+					/* right now, buf[] is a string of hex
+					 * digits (like BCD, but in hex);
+					 * process it into raw values */
+					for (ptr = 0; ptr < len + 5; ++ptr)
+						buf[ptr] = buf[1 + ptr * 2] * 0x10
+							+ buf[2 + ptr * 2];
+					if (ihex(buf, len))
+						putchar('X');
+					else
+						putchar('.');
+					break;
+				}
+			} else if (ptr < sizeof buf - 1) {
+				buf[ptr++] = c;
+				putchar(c);
+				if (c == ':' && ptr == 1) {
+					ihex_len = 0xff;
+					len = 0xff;
+				}
 			}
 		}
 		putchar('\n');
-		for (--ptr; ptr > 0 && IS_WHITESPACE(buffer[ptr]); --ptr);
-		if (++ptr) {
-			char leading;
-			buffer[ptr] = '\0';
-			for (leading = 0; buffer[leading]
-					&& IS_WHITESPACE(buffer[leading]);
-					++leading);
-			if (leading < ptr)
-				eval(buffer + leading, ptr - leading);
+		if (!ihex_len) {
+			for (--ptr; ptr > 0 && IS_WHITESPACE(buf[ptr]); --ptr);
+			if (++ptr) {
+				char leading;
+				buf[ptr] = '\0';
+				for (leading = 0; buf[leading]
+						&& IS_WHITESPACE(buf[leading]);
+						++leading);
+				if (leading < ptr)
+					eval(buf + leading, ptr - leading);
+			}
 		}
 	}
 }

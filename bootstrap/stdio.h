@@ -1,7 +1,7 @@
 #ifndef STDIO_H
 #define STDIO_H
 
-#define BUFSIZ 0x40
+#define BUFSIZ 0x20
 
 char getchar(void);
 void putchar(char);
