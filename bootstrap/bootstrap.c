@@ -95,7 +95,7 @@ static char strncmp(const char *s1, const char *s2, unsigned char n)
 	return 0;
 }
 
-static __bit ihex(const char *buf, unsigned char len)
+static __bit ihex(const unsigned char *buf, unsigned char len)
 {
 	static unsigned short page = 0xffff;
 	static unsigned char data[0x20];
