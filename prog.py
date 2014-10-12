@@ -60,7 +60,7 @@ class target(object):
             termios.CS8 | termios.CREAD | termios.CLOCAL,  # cflag
             termios.IEXTEN | termios.ECHOE | termios.ECHOK,  # lflag
             termios.B19200,  # ospeed
-            0,  # ispeed (use ospeed)
+            termios.B19200,  # ispeed
             attr[6],  # cc
         ])
         self.tty = tty
