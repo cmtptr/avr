@@ -2,8 +2,9 @@ MCU ?= attiny25
 
 CC := avr-gcc
 CFLAGS ?= -pipe
-CPPFLAGS := -DF_CPU=8000000UL -mmcu=$(MCU) -O2 -pedantic -std=c99 -Wall -Werror\
-	-Wextra
+CFLAGS += -mmcu=$(MCU)
+CPPFLAGS := -DF_CPU=8000000UL -O2 -pedantic -std=c99 -Wall -Werror\
+	-Wextra -Wno-error=main
 OBJCOPY := avr-objcopy
 
 sources := test.c
@@ -27,6 +28,6 @@ $(bin): $(objects)
 	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $(objects) $(LDADD)
 
 $(hex): $(bin)
-	$(OBJCOPY) -O ihex $(bin) $@
+	$(OBJCOPY) -j .text -j .data -O ihex $(bin) $@
 
 $(objects): Makefile

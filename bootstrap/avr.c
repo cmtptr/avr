@@ -26,9 +26,8 @@ void avr_reset(void)
 }
 
 /* transmit/receive on the SPI */
-#define spi_xcv(tx, rx) spi_xcv_l(tx, rx, sizeof tx)
-static void spi_xcv_l(const unsigned char *tx, unsigned char *rx,
-		unsigned char len)
+#define spi_xcv(tx, rx) avr_spi(tx, rx, sizeof tx)
+void avr_spi(const char *tx, char *rx, unsigned char len)
 {
 	unsigned char i;
 	for (i = 0; i < len; ++i) {
@@ -90,12 +89,6 @@ static __bit is_rdy(void)
 	unsigned char rx[sizeof tx];
 	spi_xcv(tx, rx);
 	return !(rx[3] & 1);
-}
-
-/* manually issue AVR serial programming instructions */
-void avr_spi(const char *tx, char *rx)
-{
-	spi_xcv_l(tx, rx, 4);
 }
 
 /* read a device signature byte */

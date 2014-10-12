@@ -405,26 +405,29 @@ static __bit eval_signature(const char *args, unsigned char len)
 
 static __bit eval_spi(const char *args, unsigned char len)
 {
-	unsigned char i, buf[4];
-	(void)len;
-	for (i = 0; i < sizeof buf; ++i) {
-		const char *end;
-		buf[i] = strtoh(args, &end);
-		if (end == args || !IS_WHITESPACE(*end))
-			return 1;
-		args = end;
+	unsigned char i, data[38];  /* (80 (input buffer) - 4 ("spi ")) / 2 */
+	if (!len)
+		return 1;
+	for (len = 0; len < sizeof data; ++len) {
+		unsigned char val;
+		if (parse_hex(*args, &val))
+			break;
+		++args;
+		if (parse_hex(*args, data + len))
+			goto error_parse;
+		++args;
+		data[len] += val * 0x10;
 	}
-	if (!avr_is_programming_enabled()) {
-		puts("spi: device is not in serial programming mode;"
-				" use \"reset prog\"\n");
-		return 0;
-	}
-	avr_spi(buf, buf);
-	for (i = 0; i < sizeof buf; ++i) {
-		print_hex(buf[i]);
-		putchar(' ');
-	}
+	if (!len || *args && !IS_WHITESPACE(*args))
+		goto error_parse;
+	avr_spi(data, data, len);
+	for (i = 0; i < len; ++i)
+		print_hex(data[i]);
 	putchar('\n');
+	if (0) {
+error_parse:
+		puts("spi: error parsing data\n");
+	}
 	return 0;
 }
 
@@ -455,7 +458,7 @@ static void eval(char *buf, unsigned char len)
 		VECTORS_ENTRY(hexdump, "[<addr> [<count>]]"),
 		VECTORS_ENTRY(reset, "[prog]"),
 		VECTORS_ENTRY(signature, 0),
-		VECTORS_ENTRY(spi, "<byte1> <byte2> <byte3> <byte4>"),
+		VECTORS_ENTRY(spi, "<data>"),
 	};
 	unsigned char i, key_len;
 	for (key_len = 0; !IS_WHITESPACE(buf[key_len]); ++key_len);
