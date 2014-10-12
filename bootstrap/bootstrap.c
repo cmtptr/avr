@@ -100,7 +100,7 @@ static __bit ihex(const unsigned char *buf, unsigned char len)
 	static unsigned short page = 0xffff;
 	static unsigned char data[0x20];
 	unsigned char i, checksum = buf[len + 4];
-	unsigned short addr;
+	unsigned short addr, newpage;
 	if (!avr_is_programming_enabled())
 		return 1;
 	for (i = 0; i < len + 4; ++i)
@@ -108,12 +108,12 @@ static __bit ihex(const unsigned char *buf, unsigned char len)
 	if (checksum)  /* checksum  error */
 		return 1;
 	addr = buf[1] * 0x100 + buf[2];
-	if (addr & 0xf)  /* address must be on a boundary of 16 */
+	newpage = addr & ~0x1f;
+	if (addr + len > newpage + sizeof data)  /* len extends beyond page boundary */
 		return 1;
 	if (!buf[3]) {
 		/* data */
 		unsigned char *ptr;
-		unsigned short newpage = addr & ~0x1f;
 		if (newpage != page) {
 			if (page != 0xffff) {
 				for (i = 0; i < sizeof data; ++i)
