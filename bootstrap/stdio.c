@@ -13,7 +13,7 @@ void stdio_isr(void) __interrupt (SI0_VECTOR)
 		unsigned char next;
 		RI = 0;
 		next = rx_wptr + 1;
-		next %= sizeof rx_buf - 1;
+		next %= sizeof rx_buf;
 		if (next != rx_rptr) {
 			rx_buf[rx_wptr] = SBUF;
 			rx_wptr = next;
@@ -25,7 +25,7 @@ void stdio_isr(void) __interrupt (SI0_VECTOR)
 			tx_idle = 1;
 		} else {
 			SBUF = tx_buf[tx_rptr++];
-			tx_rptr %= sizeof tx_buf - 1;
+			tx_rptr %= sizeof tx_buf;
 			if (tx_rptr == tx_wptr)
 				tx_empty = 1;
 		}
@@ -38,7 +38,7 @@ char getchar(void)
 	while (rx_rptr == rx_wptr);  /* block until something is available */
 	ES = 0;
 	c = rx_buf[rx_rptr++];
-	rx_rptr %= sizeof rx_buf - 1;
+	rx_rptr %= sizeof rx_buf;
 	ES = 1;
 	return c;
 }
@@ -60,7 +60,7 @@ void putchar(char c)
 			ES = 0;
 			tx_empty = 0;
 			tx_buf[tx_wptr++] = c;
-			tx_wptr %= sizeof tx_buf - 1;
+			tx_wptr %= sizeof tx_buf;
 			ES = 1;
 		}
 	}
