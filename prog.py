@@ -89,7 +89,6 @@ class target(object):
 
 class mcs51(target):
     def __init__(self, filename):
-        # TODO mcs51.__init__() doesn't work (always EAGAIN)
         super().__init__(filename)
         u = b"U"
         while True:
