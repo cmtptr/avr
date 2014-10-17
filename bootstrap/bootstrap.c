@@ -95,53 +95,67 @@ static char strncmp(const char *s1, const char *s2, unsigned char n)
 	return 0;
 }
 
-static __bit ihex(const unsigned char *buf, unsigned char len)
+static inline void ihex_write(unsigned short page, const unsigned char *data)
+{
+	unsigned char i;
+	for (i = 0; i < 0x20; ++i)
+		avr_flash_load(page + i, data[i]);
+	avr_flash_write(page);
+}
+
+static inline void ihex_clear(unsigned char *data)
+{
+	unsigned char i;
+	for (i = 0; i < 0x20; ++i)
+		data[i] = 0xff;
+}
+
+/* process an Intel HEX record from the command line; return an ASCII character
+ * representing a status code to be printed:
+ *  '.'  success
+ *  'C'  checksum error
+ *  'L'  data length exceeds the maximum of 32 bytes
+ *  'P'  programming mode has not been enabled
+ *  'T'  unrecognized record type */
+static char ihex(const unsigned char *buf, unsigned char len)
 {
 	static unsigned short page = 0xffff;
 	static unsigned char data[0x20];
 	unsigned char i, checksum = buf[len + 4];
-	unsigned short addr, newpage;
 	if (!avr_is_programming_enabled())
-		return 1;
+		return 'P';
 	for (i = 0; i < len + 4; ++i)
 		checksum += buf[i];
 	if (checksum)  /* checksum  error */
-		return 1;
-	addr = buf[1] * 0x100 + buf[2];
-	newpage = addr & ~0x1f;
-	if (addr + len > newpage + sizeof data)  /* len extends beyond page boundary */
-		return 1;
-	if (!buf[3]) {
-		/* data */
-		unsigned char *ptr;
-		if (newpage != page) {
-			if (page != 0xffff) {
-				for (i = 0; i < sizeof data; ++i)
-					avr_flash_load(page + i, data[i]);
-				avr_flash_write(page);
+		return 'C';
+	if (len > sizeof data)  /* data length in excess */
+		return 'L';
+	if (!buf[3]) {  /* data */
+		union {
+			unsigned char u8[2];
+			unsigned short u16;
+		} addr;
+		addr.u8[0] = buf[2];
+		addr.u8[1] = buf[1];
+		for (i = 0; i < len; ++i, ++addr.u16) {
+			unsigned short newpage = addr.u16 & ~0x1f;
+			unsigned char dest = addr.u16 % sizeof data;
+			if (newpage != page) {
+				if (page != 0xffff)
+					ihex_write(page, data);
+				ihex_clear(data);
+				page = newpage;
 			}
-			for (i = 0; i < sizeof data; ++i)
-				data[i] = 0xff;
-			page = newpage;
+			data[dest] = buf[i + 4];
 		}
-		ptr = data + (addr & 0x10);
-		for (i = 0; i < len; ++i)
-			ptr[i] = buf[i + 4];
-	} else if (buf[3] == 1) {
-		/* end of file */
-		if (page != 0xffff) {
-			for (i = 0; i < sizeof data; ++i)
-				avr_flash_load(page + i, data[i]);
-			avr_flash_write(page);
-		}
-		for (i = 0; i < sizeof data; ++i)
-			data[i] = 0xff;
+	} else if (buf[3] == 1) {  /* end of file */
+		if (page != 0xffff)
+			ihex_write(page, data);
 		page = 0xffff;
-	} else {
-		/* unrecognized type */
-		return 1;
+	} else {  /* unrecognized type */
+		return 'T';
 	}
-	return 0;
+	return '.';
 }
 
 static __bit eval_eeprom(const char *args, unsigned char len)
@@ -496,12 +510,12 @@ void main(void)
 {
 	/* delay timer setup */
 	TMOD = T0_M1;  /* timer 0 in 8-bit auto-reload mode */
-	TH0 = -F_OSC / 12 / 4000;  /* 250-us timer */
+	TH0 = -F_CPU / 12 / 4000;  /* 250-us timer */
 
 	/* serial port setup */
 	SCON = SCON_SM1 | SCON_REN;  /* 8-bit UART mode, receive enabled */
-	RCAP2L = -F_OSC / 32 / F_UART;
-	RCAP2H = -F_OSC / 32 / F_UART >> 8;
+	RCAP2L = -F_CPU / 32 / F_UART;
+	RCAP2H = -F_CPU / 32 / F_UART >> 8;
 	IE = IE_EA | IE_ES0;  /* enable the serial interrupt */
 	T2CON = T2CON_TF2 | T2CON_RCLK | T2CON_TCLK | T2CON_TR2;  /* start T2 */
 
@@ -550,10 +564,7 @@ void main(void)
 					for (ptr = 0; ptr < len + 5; ++ptr)
 						buf[ptr] = buf[1 + ptr * 2] * 0x10
 							+ buf[2 + ptr * 2];
-					if (ihex(buf, len))
-						putchar('X');
-					else
-						putchar('.');
+					putchar(ihex(buf, len));
 					break;
 				}
 			} else if (ptr < sizeof buf - 1) {
