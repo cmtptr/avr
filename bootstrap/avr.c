@@ -31,10 +31,22 @@ void avr_spi(const char *tx, char *rx, unsigned char len)
 {
 	unsigned char i;
 	for (i = 0; i < len; ++i) {
+#ifndef SPI_SW
 		SPSR &= ~SPIF;
 		SPDAT = tx[i];
 		while (!(SPSR & SPIF));
 		rx[i] = SPDAT;
+#else
+		unsigned char out = tx[i], in = 0, j;
+		for (j = 0; j < 8; ++j) {
+			out = out >> 7 | out << 1;
+			P1_5 = out & 1;
+			P1_7 = 1;
+			in = in << 1 | P1_6;
+			P1_7 = 0;
+		}
+		rx[i] = in;
+#endif
 	}
 }
 

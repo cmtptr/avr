@@ -1,6 +1,7 @@
 CC := sdcc
 CFLAGS := --model-large
-CPPFLAGS := --stack-auto --std-c99 -DF_CPU=4915200 -DF_UART=19200 -mmcs51
+CPPFLAGS := --stack-auto --std-c99 -DF_CPU=4915200 -DF_UART=19200 -DSPI_SW\
+	-mmcs51
 LDFLAGS := --code-size 65536 --iram-size 256 --xram-size 768
 PACKIHX := packihx
 

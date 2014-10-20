@@ -520,7 +520,11 @@ void main(void)
 	T2CON = T2CON_TF2 | T2CON_RCLK | T2CON_TCLK | T2CON_TR2;  /* start T2 */
 
 	/* SPI setup */
+#ifndef SPI_SW
 	SPCR = SPE | MSTR | SPR1;  /* SPI on, master mode, SCK = f(OSC) / 64 */
+#else
+	P1_7 = 0;  /* SCK idles low */
+#endif
 
 	/* repl */
 	while (1) {
