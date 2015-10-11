@@ -3,7 +3,7 @@ MCU ?= attiny25
 CC := avr-gcc
 CFLAGS ?= -pipe
 CFLAGS += -mmcu=$(MCU)
-CPPFLAGS := -DF_CPU=8000000ul -O2 -pedantic -std=c99 -Wall -Werror -Wextra
+CPPFLAGS := -DF_CPU=1000000ul -O2 -pedantic -std=c99 -Wall -Werror -Wextra
 OBJCOPY := avr-objcopy
 
 sources := test.c
